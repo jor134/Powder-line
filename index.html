@@ -252,7 +252,7 @@ function vnoise(x,y,s){
 }
 
 /* ---------- terrain feature bands ---------- */
-const FEAT=["open","cliff","glade","boulder","cliff","open","glade","cliff","boulder","open"];
+const FEAT=["open","cliff","glade","park","boulder","cliff","open","glade","park","cliff","boulder","open"];
 function featOf(b){ if(b<1) return "open"; return FEAT[Math.floor(hash2(b,7,SEED)*FEAT.length)%FEAT.length]; }
 function dropOf(b){
   if(featOf(b)!=="cliff") return 0;
@@ -263,6 +263,34 @@ function cumDrop(b){
   if(_cumSeed!==SEED){ _cum=[0]; _cumSeed=SEED; }
   while(_cum.length<=b){const i=_cum.length;_cum.push(_cum[i-1]+dropOf(i-1));}
   return _cum[b];
+}
+
+let _park={}, _parkSeed=null;
+function parkKickers(b){
+  if(_parkSeed!==SEED){ _park={}; _parkSeed=SEED; }
+  let k=_park[b];
+  if(!k){
+    k=[];
+    for(let i=0;i<3;i++) k.push({
+      kz: 20+i*29,
+      xc: (hash2(b,50+i,SEED)*2-1)*42,
+      H : 3.2+hash2(b,60+i,SEED)*2.5
+    });
+    _park[b]=k;
+  }
+  return k;
+}
+function kickerAt(b,x,lz){
+  const ks=parkKickers(b);
+  let add=0;
+  for(let i=0;i<3;i++){
+    const k=ks[i], u=lz-k.kz;
+    let h=0;
+    if(u>-11&&u<=0) h=k.H*smoothstep(-11,0,u);          // run-up ramp
+    else if(u>0&&u<3.4) h=k.H*(1-smoothstep(0,3.4,u));  // lip face falls away
+    if(h>0) add += h*(1-smoothstep(7,19,Math.abs(x-k.xc)));
+  }
+  return add;
 }
 
 function heightAt(x,z){
@@ -281,6 +309,8 @@ function heightAt(x,z){
     if(t>0&&t<1) y += Math.sin(t*Math.PI)*2.6;
   }else if(f==="open"){
     y += Math.sin(lz*0.085)*2.4*Math.sin(Math.PI*lz/CS);   // rollers, faded at band seams
+  }else if(f==="park"){
+    y += kickerAt(b,x,lz);
   }
   return y-drop;
 }
@@ -382,7 +412,10 @@ const pineGeo=new THREE.ConeGeometry(2.5,9,7,1);
 pineGeo.translate(0,4.5,0);
 const barkGeo=new THREE.CylinderGeometry(0.42,0.55,3,5); barkGeo.translate(0,1.5,0);
 const rockGeo=new THREE.IcosahedronGeometry(1,0);
-const MAXT=54, MAXR=26;
+const logGeo=new THREE.CylinderGeometry(1,1,1,8);
+logGeo.rotateX(Math.PI/2);          // axis now runs along +Z, so scale.z is the length
+const MAXT=54, MAXR=26, MAXL=8;
+const LOG_R=0.38;
 
 class Chunk{
   constructor(){
@@ -394,7 +427,9 @@ class Chunk{
     this.barks=new THREE.InstancedMesh(barkGeo,MAT.bark,MAXT);
     this.rocks=new THREE.InstancedMesh(rockGeo,MAT.rock,MAXR);
     this.rOut=new THREE.InstancedMesh(rockGeo,MAT.ink,MAXR);
-    this.all=[this.mesh,this.trees,this.tOut,this.barks,this.rocks,this.rOut];
+    this.logs=new THREE.InstancedMesh(logGeo,MAT.bark,MAXL);
+    this.lOut=new THREE.InstancedMesh(logGeo,MAT.ink,MAXL);
+    this.all=[this.mesh,this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut];
     this.all.forEach(m=>{m.frustumCulled=false;m.visible=false;scene.add(m);});
     this.obs=[]; this.band=-1;
   }
@@ -414,9 +449,65 @@ class Chunk{
     this.obs.length=0;
     const rnd=mulberry(b*7919+SEED);
     const f=featOf(b);
-    const nT = f==="glade"?MAXT : f==="boulder"?14 : f==="cliff"?12 : 26;
-    const nR = f==="boulder"?MAXR : f==="glade"?4 : 10;
+    const nT = f==="glade"?MAXT : f==="boulder"?14 : f==="cliff"?12 : f==="park"?8 : 26;
+    const nR = f==="boulder"?MAXR : f==="glade"?4 : f==="park"?2 : 10;
     const d=new THREE.Object3D();
+    d.rotation.order="YXZ";
+
+    /* --- fallen trees: grindable rails lying down the fall line --- */
+    const nL = f==="park"?MAXL : (f==="glade"||f==="open")?3 : 1;
+    let li=0;
+    for(let i=0;i<MAXL;i++){
+      let placed=false;
+      for(let attempt=0; attempt<8 && li<nL && !placed; attempt++){
+        const park=f==="park", ks=park?parkKickers(b):null;
+        const k=park?ks[li%3]:null;
+        const len=park?(26+rnd()*16):(16+rnd()*14);
+        const x = park ? (k.xc + (rnd()*2-1)*7) : (rnd()*2-1)*84;
+        const margin=len/2+5;
+        const zc= park ? clamp(z0+k.kz+24+(li>2?rnd()*20:0), z0+margin, z0+CS-margin)
+                       : (z0+margin+rnd()*Math.max(1,CS-2*margin));
+        const yaw=(rnd()*2-1)*0.22;
+        const sN=Math.sin(yaw), cN=Math.cos(yaw), hl=len/2;
+        if(Math.abs(x)>=92) continue;
+
+        // least-squares fit of a straight trunk to the ground beneath it
+        const NS=25; let sAA=0,sAH=0;
+        const samp=[];
+        for(let j=0;j<NS;j++){
+          const a=-hl+2*hl*j/(NS-1);
+          const hh=heightAt(x+sN*a,zc+cN*a);
+          samp.push([a,hh]); sAA+=a*a; sAH+=a*hh;
+        }
+        const dy=sAH/sAA;
+        let hi=-1e9, lo=1e9;
+        for(const [a,hh] of samp){ const r=hh-a*dy; if(r>hi)hi=r; if(r<lo)lo=r; }
+        // a trunk is straight: reject any spot where it would bridge a hollow or a
+        // cliff lip and hang in mid-air
+        if(hi-lo>1.30) continue;
+
+        const hc=hi;
+        d.position.set(x,hc+LOG_R,zc);
+        d.rotation.set(Math.atan2(-dy,1),yaw,0);
+        d.scale.set(LOG_R,LOG_R,len);
+        d.updateMatrix(); this.logs.setMatrixAt(li,d.matrix);
+        d.scale.set(LOG_R*1.14,LOG_R*1.14,len*1.005);
+        d.updateMatrix(); this.lOut.setMatrixAt(li,d.matrix);
+        this.obs.push({x,z:zc,r:LOG_R,t:2,yaw,half:hl,cy:hc+LOG_R*2,dy});
+        li++; placed=true;
+      }
+      if(!placed){
+        d.position.set(0,-9999,0); d.rotation.set(0,0,0); d.scale.set(0.001,0.001,0.001);
+        d.updateMatrix(); this.logs.setMatrixAt(i,d.matrix); this.lOut.setMatrixAt(i,d.matrix);
+      }
+    }
+    const logs=this.obs.slice();
+    const clearOfLogs=(x,z)=>logs.every(L=>{
+      const sn=Math.sin(L.yaw), cs=Math.cos(L.yaw);
+      const along=(x-L.x)*sn+(z-L.z)*cs, lat=(x-L.x)*cs-(z-L.z)*sn;
+      return Math.abs(along)>L.half+3 || Math.abs(lat)>2.6;
+    });
+
     let ti=0;
     for(let i=0;i<MAXT;i++){
       if(ti<nT){
@@ -425,7 +516,7 @@ class Chunk{
         const gx=heightAt(x-2,z)-heightAt(x+2,z), gz=heightAt(x,z-2)-heightAt(x,z+2);
         const steep=Math.hypot(gx,gz)/4;
         const nearCliff = f==="cliff" && Math.abs(z-(z0+58))<16;
-        if(steep<0.62 && !nearCliff && Math.abs(x)<98){
+        if(steep<0.62 && !nearCliff && Math.abs(x)<98 && clearOfLogs(x,z)){
           d.position.set(x,heightAt(x,z)-0.6,z); d.rotation.set(0,rnd()*6.28,0); d.scale.set(s,s*(0.85+rnd()*0.5),s);
           d.updateMatrix(); this.trees.setMatrixAt(ti,d.matrix); this.barks.setMatrixAt(ti,d.matrix);
           d.scale.multiplyScalar(1.05); d.updateMatrix(); this.tOut.setMatrixAt(ti,d.matrix);
@@ -440,7 +531,7 @@ class Chunk{
       if(ri<nR){
         const x=(rnd()*2-1)*100, z=z0+rnd()*CS;
         const s=1.1+rnd()*2.6;
-        if(Math.abs(x)<100){
+        if(Math.abs(x)<100 && clearOfLogs(x,z)){
           d.position.set(x,heightAt(x,z)-s*0.35,z);
           d.rotation.set(rnd()*6.28,rnd()*6.28,rnd()*6.28); d.scale.set(s,s*0.8,s);
           d.updateMatrix(); this.rocks.setMatrixAt(ri,d.matrix);
@@ -451,7 +542,8 @@ class Chunk{
       d.position.set(0,-9999,0); d.scale.set(0.001,0.001,0.001); d.updateMatrix();
       this.rocks.setMatrixAt(i,d.matrix); this.rOut.setMatrixAt(i,d.matrix);
     }
-    [this.trees,this.tOut,this.barks,this.rocks,this.rOut].forEach(m=>m.instanceMatrix.needsUpdate=true);
+    [this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut]
+      .forEach(m=>m.instanceMatrix.needsUpdate=true);
     this.all.forEach(m=>m.visible=true);
   }
 }
@@ -584,21 +676,23 @@ const PN=420;
 const sprayGeo=new THREE.BufferGeometry();
 const sPos=new Float32Array(PN*3), sVel=new Float32Array(PN*3), sLife=new Float32Array(PN);
 sprayGeo.setAttribute("position",new THREE.BufferAttribute(sPos,3));
-const spray=new THREE.Points(sprayGeo,new THREE.PointsMaterial({color:0xffffff,size:0.55,
-  transparent:true,opacity:0.85,depthWrite:false,sizeAttenuation:true}));
+const spray=new THREE.Points(sprayGeo,new THREE.PointsMaterial({color:0xffffff,size:0.30,
+  transparent:true,opacity:0.38,depthWrite:false,sizeAttenuation:true}));
 spray.frustumCulled=false; scene.add(spray);
 let sHead=0;
 for(let i=0;i<PN;i++){sPos[i*3+1]=-9999;}
 function emitSpray(p,dir,amount){
   for(let k=0;k<amount;k++){
     const i=sHead=(sHead+1)%PN;
-    sPos[i*3]=p.x+(Math.random()-0.5)*0.7;
-    sPos[i*3+1]=p.y+0.05;
-    sPos[i*3+2]=p.z+(Math.random()-0.5)*0.7;
-    sVel[i*3]=-dir.x*2.5+(Math.random()-0.5)*5;
-    sVel[i*3+1]=2.4+Math.random()*3.4;
-    sVel[i*3+2]=-dir.z*2.5+(Math.random()-0.5)*5;
-    sLife[i]=0.55+Math.random()*0.5;
+    // thrown from BEHIND the tail and kept low, so it never sits between
+    // the camera and the rider
+    sPos[i*3]=p.x-dir.x*1.5+(Math.random()-0.5)*0.5;
+    sPos[i*3+1]=p.y-0.12;
+    sPos[i*3+2]=p.z-dir.z*1.5+(Math.random()-0.5)*0.5;
+    sVel[i*3]=-dir.x*3.2+(Math.random()-0.5)*3.0;
+    sVel[i*3+1]=1.0+Math.random()*1.5;
+    sVel[i*3+2]=-dir.z*3.2+(Math.random()-0.5)*3.0;
+    sLife[i]=0.34+Math.random()*0.30;
   }
 }
 function stepSpray(dt){
@@ -748,6 +842,7 @@ function readTouch(){
 const P={
   pos:new THREE.Vector3(0,0,0), yaw:0, speed:8, vy:0, air:false, airT:0, maxAir:0,
   spinAcc:0, flipAcc:0, roll:0, grabT:0, grabKind:0, tuckT:0, clock:0,
+  grinding:false, grindT:0, railCool:0, railJump:false, railBail:false,
   score:0, combo:0, comboT:0, crash:0, alive:true
 };
 function resetPlayer(){
@@ -756,6 +851,7 @@ function resetPlayer(){
   chunks.forEach(c=>{ c.band=-1; c.all.forEach(m=>m.visible=false); });
   P.pos.set(0,heightAt(0,0),0); P.yaw=0; P.speed=9; P.vy=0; P.air=false; P.airT=0;
   P.spinAcc=0; P.flipAcc=0; P.roll=0; P.grabT=0; P.grabKind=0; P.tuckT=0; P.clock=0;
+  P.grinding=false; P.grindT=0; P.railCool=0; P.railJump=false; P.railBail=false;
   P.score=0; P.combo=0; P.comboT=0; P.crash=0;
   syncChunks(0);
   P.pos.y=heightAt(0,0);
@@ -809,6 +905,49 @@ function wipeout(){
   blip(90,0.4,"sawtooth",0.16);
 }
 
+function resolveLanding(){
+  const sErr=Math.abs(((P.spinAcc%180)+270)%180-90);            // 0 = perfectly square
+  const fErr=Math.abs(((P.flipAcc%360)+540)%360-180);           // 0 = fully round
+  const clean=(sErr<62)&&(fErr<62)&&P.crash<=0;
+  P.spinAcc=Math.round(P.spinAcc/180)*180;
+  P.flipAcc=Math.round(P.flipAcc/360)*360;
+  P.air=false;
+  land(clean);
+}
+
+/* --- rails: a fallen trunk you can ride if you arrive on top of it,
+       roughly lined up with it, and not already hopping off one. --- */
+function findRail(){
+  if(P.railCool>0||P.crash>0) return null;
+  for(const o of obstaclesNear(P.pos.z)){
+    if(o.t!==2) continue;
+    const sn=Math.sin(o.yaw), cs=Math.cos(o.yaw);
+    const dx=P.pos.x-o.x, dz=P.pos.z-o.z;
+    const along=dx*sn+dz*cs, lat=dx*cs-dz*sn;
+    if(Math.abs(along)>o.half||Math.abs(lat)>0.95) continue;
+    const top=o.cy+along*o.dy;
+    // lower bound reaches below snow level so riding over a trunk picks you up onto it
+    if(P.pos.y>top+0.95||P.pos.y<top-1.05) continue;
+    let d=P.yaw-o.yaw; while(d>Math.PI)d-=6.283; while(d<-Math.PI)d+=6.283;
+    if(Math.abs(d)>1.00) continue;
+    return {o,along,top};
+  }
+  return null;
+}
+function endGrind(){
+  if(!P.grinding) return;
+  P.grinding=false;
+  const t=P.grindT; P.grindT=0; P.railCool=0.30;
+  if(t<0.30) return;
+  P.combo=Math.min(P.combo+1,9);
+  const mult=Math.min(1+0.22*(P.combo-1),2.6);
+  const pts=Math.round((Math.floor(t*105)+(t>1.6?90:0))*mult);
+  P.score+=pts; P.comboT=4.5;
+  showTrick("RAIL "+t.toFixed(1)+"s  +"+pts);
+  if(P.combo>1){ elCombo.textContent="COMBO ×"+mult.toFixed(1); elCombo.classList.add("on"); }
+  blip(620,0.14,"triangle",0.10);
+}
+
 /* ---------- step ---------- */
 function stepPlayer(dt){
   if(P.crash>0){
@@ -820,7 +959,12 @@ function stepPlayer(dt){
   const n=normalAt(P.pos.x,P.pos.z);
   const grounded=!P.air;
 
-  if(grounded){
+  if(P.grinding){
+    // rails have their own physics; here we only capture intent for this frame
+    P.railJump = IN.jump; P.railBail = Math.abs(IN.carve)>0.75;
+    P.tucking=false; P.tuckT=0; IN.jump=false;
+  }else if(grounded){
+    P.railJump=false; P.railBail=false;
     P.tucking = IN.hold && P.crash<=0;
     if(P.tucking) P.tuckT+=dt; else P.tuckT=0;
     // a tuck trades steering authority for a much lower drag coefficient
@@ -836,6 +980,7 @@ function stepPlayer(dt){
     if(IN.jump&&P.crash<=0){ P.vy=10.6+P.speed*0.145; P.air=true; blip(300,0.11,"square",0.09); }
     IN.jump=false;
   }else{
+    P.railJump=false; P.railBail=false;
     P.tucking=false; P.tuckT=0;
     P.airT+=dt; P.maxAir=Math.max(P.maxAir,P.airT);
     P.vy-=G*dt;
@@ -865,6 +1010,26 @@ function stepPlayer(dt){
   P.pos.y+=P.vy*dt;
 
   const gh2=heightAt(P.pos.x,P.pos.z);
+  if(P.railCool>0) P.railCool-=dt;
+
+  const rail=findRail();
+  if(rail){
+    if(P.air) resolveLanding();                 // score the trick that put you here
+    P.grinding=true; P.grindT+=dt;
+    P.pos.y=rail.top+0.06; P.vy=0; P.air=false;
+    P.yaw=lerp(P.yaw,rail.o.yaw,Math.min(1,dt*7));
+    P.roll=lerp(P.roll,0,dt*8);
+    const rd=rail.o.dy;
+    P.speed+=G*(-rd)/Math.sqrt(1+rd*rd)*dt;     // the trunk follows the slope
+    P.speed-=(0.020*P.speed+0.35)*dt;           // and is far faster than powder
+    P.speed=Math.max(0,P.speed);
+    if(P.railJump||IN.jump){ P.vy=10.6+P.speed*0.145; P.air=true; endGrind();
+                             blip(300,0.11,"square",0.09); }
+    else if(P.railBail||Math.abs(IN.carve)>0.75) endGrind();
+    P.railJump=false; P.railBail=false; IN.jump=false;
+    if(P.speed>6&&Math.random()<0.5) emitSpray(P.pos,f2,1);
+  }else{
+  if(P.grinding) endGrind();
   if(!P.air){
     // leave the ground when the terrain drops away faster than a ballistic arc
     const D=4.0;
@@ -877,18 +1042,14 @@ function stepPlayer(dt){
     else { P.pos.y=gh2; P.vy=0; }
   }else if(P.pos.y<=gh2){
     P.pos.y=gh2; P.vy=0; P.air=false;
-    const sErr=Math.abs(((P.spinAcc%180)+270)%180-90);          // 0 = perfectly square
-    const fErr=Math.abs(((P.flipAcc%360)+540)%360-180);          // 0 = fully round
-    const clean=(sErr<62)&&(fErr<62)&&P.crash<=0;
-    P.spinAcc=Math.round(P.spinAcc/180)*180;
-    P.flipAcc=Math.round(P.flipAcc/360)*360;
-    land(clean);
-    if(P.speed>10) emitSpray(P.pos,f2,26);
+    resolveLanding();
+    if(P.speed>10) emitSpray(P.pos,f2,14);
+  }
   }
 
   // powder spray + audio
-  if(!P.air&&P.speed>7){
-    emitSpray(P.pos,f2,1+Math.floor(Math.abs(IN.carve)*3+P.speed*0.05));
+  if(!P.air&&!P.grinding&&P.speed>7){
+    emitSpray(P.pos,f2,1+Math.floor(Math.abs(IN.carve)*1.4+P.speed*0.02));
   }
   if(carveGain) carveGain.gain.value=(!P.air&&P.crash<=0)?Math.min(0.16,Math.abs(IN.carve)*P.speed*0.004):0;
   if(windGain) windGain.gain.value=Math.min(0.10,P.speed*0.0022);
@@ -896,6 +1057,7 @@ function stepPlayer(dt){
   // obstacles
   if(P.crash<=0){
     for(const o of obstaclesNear(P.pos.z)){
+      if(o.t===2) continue;                      // logs are ridden, never crashed into
       const dx=P.pos.x-o.x, dz=P.pos.z-o.z;
       if(dx*dx+dz*dz < (o.r+0.65)*(o.r+0.65)){
         const oh=heightAt(o.x,o.z);
