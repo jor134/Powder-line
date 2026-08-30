@@ -60,11 +60,12 @@
   /* ---------- touch zones ---------- */
   #zones{position:fixed;inset:0;z-index:9;display:flex}
   #zL,#zR{flex:1;touch-action:none}
-  .hint{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));font-size:10px;
-    letter-spacing:.16em;opacity:.62;font-weight:800;pointer-events:none;color:#0b1f2f;
-    text-shadow:0 1px 0 rgba(255,255,255,.7)}
-  #hintL{left:max(20px,env(safe-area-inset-left))}
-  #hintR{right:max(20px,env(safe-area-inset-right))}
+  #hints{position:fixed;left:0;right:0;z-index:9;pointer-events:none;text-align:center;
+    top:calc(env(safe-area-inset-top) + 118px);
+    font-size:clamp(9px,2.6vw,11px);letter-spacing:.14em;line-height:1.85;font-weight:800;
+    color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.8);opacity:.72;
+    transition:opacity .7s;padding:0 16px}
+  #hints.gone{opacity:0}
   .joy{position:fixed;width:112px;height:112px;margin:-56px 0 0 -56px;pointer-events:none;z-index:9;
     opacity:.55;transition:opacity .14s;will-change:transform}
   .joy.live{opacity:1}
@@ -76,8 +77,10 @@
   .joy .knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;
     border-radius:50%;background:rgba(11,31,47,.82);border:2px solid rgba(255,255,255,.7);
     box-shadow:0 2px 10px rgba(6,24,40,.35)}
-  .joy .cap{position:absolute;left:0;right:0;bottom:-20px;text-align:center;font-size:9px;
-    font-weight:900;letter-spacing:.20em;color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.75)}
+  .joy .cap{position:absolute;left:0;right:0;top:-19px;text-align:center;font-size:9px;
+    font-weight:900;letter-spacing:.20em;color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.75);
+    transition:opacity .12s}
+  .joy.live .cap{opacity:0}
   #stickR .knob{background:rgba(120,60,0,.82)}
   #stickR.grabbing .knob{background:#8a4b00;transform:scale(.82)}
 
@@ -120,10 +123,15 @@
 
 <div id="zones" class="hide">
   <div id="zL"></div><div id="zR"></div>
-  <div class="hint" id="hintL">STEER · PUSH IN AIR TO GRAB</div>
-  <div class="hint" id="hintR">TAP JUMP · PUSH SPIN · HOLD TUCK</div>
+
   <div class="joy" id="stickL"><div class="ring"></div><div class="knob" id="knobL"></div><div class="cap">CARVE</div></div>
   <div class="joy" id="stickR"><div class="ring"></div><div class="knob" id="knobR"></div><div class="cap">TRICK</div></div>
+</div>
+
+<div id="hints" class="hide">
+  <div>LEFT STICK — STEER</div>
+  <div>PUSH IT IN THE AIR TO GRAB</div>
+  <div>RIGHT — TAP JUMP · PUSH SPIN · HOLD TO TUCK</div>
 </div>
 
 <div id="hud" class="hide">
@@ -656,10 +664,27 @@ const JOY={
      home:null,touch:null,dx:0,dy:0}
 };
 const JOY_R=52, DEAD_C=7, DEAD_T=11, GRAB_PUSH=26;
+function safeInsets(){
+  try{
+    const p=document.createElement("div");
+    p.style.cssText="position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;"+
+      "padding:env(safe-area-inset-top) env(safe-area-inset-right) "+
+      "env(safe-area-inset-bottom) env(safe-area-inset-left)";
+    document.body.appendChild(p);
+    const c=getComputedStyle(p);
+    const v={t:parseFloat(c.paddingTop)||0,r:parseFloat(c.paddingRight)||0,
+             b:parseFloat(c.paddingBottom)||0,l:parseFloat(c.paddingLeft)||0};
+    p.parentNode.removeChild(p);
+    return v;
+  }catch(e){ return {t:0,r:0,b:0,l:0}; }
+}
 function joyHome(){
-  const m=Math.max(76,Math.min(122,innerWidth*0.20));
-  const y=innerHeight-Math.max(96,innerHeight*0.17);
-  JOY.L.home=[m,y]; JOY.R.home=[innerWidth-m,y];
+  const ins=safeInsets(), w=innerWidth, h=innerHeight;
+  const margin=Math.max(72,Math.min(130,w*0.19));
+  // keep the whole ring clear of the bottom edge on short landscape viewports
+  const lift=Math.max(96,Math.min(h*0.20,168));
+  const y=Math.min(h-ins.b-JOY_R-26, h-ins.b-lift);
+  JOY.L.home=[margin+ins.l,y]; JOY.R.home=[w-margin-ins.r,y];
   placeJoy(JOY.L,JOY.L.home[0],JOY.L.home[1]); placeJoy(JOY.R,JOY.R.home[0],JOY.R.home[1]);
 }
 function placeJoy(j,x,y){ j.el.style.left=x+"px"; j.el.style.top=y+"px"; }
@@ -1133,7 +1158,7 @@ function setStance(dir){
 }
 
 /* ---------- game state ---------- */
-let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0;
+let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0, hintsT=0;
 function startRun(broadcast){
   if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE});
   NET.winner=null; NET.started=true; lastPip=0;
@@ -1141,6 +1166,7 @@ function startRun(broadcast){
   resetPlayer();
   document.querySelectorAll(".panel").forEach(p=>p.classList.add("hide"));
   $("hud").classList.remove("hide"); $("zones").classList.remove("hide");
+  $("hints").classList.remove("hide"); $("hints").classList.remove("gone"); hintsT=7;
   if(MODE!=="time") elGoal.textContent="/ 10,000 TO WIN";
   paintMode();
   state="countdown"; countdown=3.2; firstFrame=true; initAudio();
@@ -1148,7 +1174,7 @@ function startRun(broadcast){
 let countdown=0;
 function endRun(){
   state="over"; NET.started=false;
-  $("hud").classList.add("hide"); $("zones").classList.add("hide");
+  $("hud").classList.add("hide"); $("zones").classList.add("hide"); $("hints").classList.add("hide");
   const rows=[{n:NET.name,s:P.score,me:true}];
   ghosts.forEach(o=>rows.push({n:o.name,s:o.score,me:false}));
   rows.sort((a,b)=>b.s-a.s);
@@ -1204,6 +1230,8 @@ function frame(t){
     stepCamera(dt,firstFrame); firstFrame=false;
     stepSpray(dt); stepGhosts(dt); updateHUD(dt);
     sendAcc+=dt; if(sendAcc>0.08){ sendAcc=0; netTick(); }
+    if(hintsT>0){ hintsT-=rdt;                      // guidance clears itself out of the way
+      if(hintsT<=0||P.air) { hintsT=0; $("hints").classList.add("gone"); } }
     P.clock+=rdt;                                   // wall clock, unaffected by slow motion
     if(MODE==="time"){
       const left=RUN_SECONDS-P.clock;

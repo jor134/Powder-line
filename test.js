@@ -439,6 +439,33 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setMode("endless"); ok(G.MODE==="endless","mode switches back");
 }
 
+/* 18l — LAYOUT: joystick furniture must not collide with anything, at any viewport.
+   The captions used to sit below the rings and overlapped the hint line in landscape. */
+{
+  const CAP=19, RING=G.JOY_R;
+  const sizes=[[390,844,"portrait phone"],[844,390,"landscape phone"],
+               [320,568,"small portrait"],[430,932,"large portrait"],
+               [932,430,"large landscape"],[280,653,"narrow cover screen"]];
+  let worstBottom=1e9, worstGap=1e9, offscreen=0, capOff=0, bad="";
+  for(const [w,h,label] of sizes){
+    S.innerWidth=w; S.innerHeight=h; G.joyHome();
+    const L=G.JOY.L.home, R=G.JOY.R.home;
+    const bottom=h-(L[1]+RING);
+    const gap=R[0]-L[0]-2*RING;
+    if(bottom<worstBottom){worstBottom=bottom;bad=label;}
+    worstGap=Math.min(worstGap,gap);
+    if(L[0]-RING<0||R[0]+RING>w) offscreen++;
+    if(L[1]-RING-CAP<0) capOff++;
+    if(Math.abs((w-R[0])-L[0])>0.51) offscreen++;   // must stay symmetric
+  }
+  ok(worstBottom>=24,"rings clear the bottom edge on every viewport (worst "+
+     worstBottom.toFixed(0)+"px, "+bad+")");
+  ok(worstGap>0,"the two rings never overlap each other (closest "+worstGap.toFixed(0)+"px apart)");
+  ok(offscreen===0,"rings stay on screen and symmetric at every size");
+  ok(capOff===0,"the caption above each ring is never clipped off the top");
+  S.innerWidth=390; S.innerHeight=844; G.joyHome();
+}
+
 /* 19 — a stick with no thumb on it never writes input */
 {
   const IN=G.IN;
