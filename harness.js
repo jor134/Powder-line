@@ -25,8 +25,10 @@ function geomPlane(w,h,sx,sz){
   const arr=new Float32Array((sx+1)*(sz+1)*3);let i=0;
   for(let iy=0;iy<=sz;iy++)for(let ix=0;ix<=sx;ix++){
     arr[i]=-w/2+w*ix/sx; arr[i+1]=0; arr[i+2]=-(h/2-h*iy/sz); i+=3;}
-  return {attributes:{position:{array:arr,needsUpdate:false}},computeVertexNormals:noop,
+  const g={attributes:{position:{array:arr,needsUpdate:false}},computeVertexNormals:noop,
     rotateX:noop,translate:noop};
+  g.setAttribute=function(n,a){g.attributes[n]=a;};
+  return g;
 }
 const THREE={
   Vector3:V3,
@@ -65,8 +67,13 @@ function el(){return{classList:{add:noop,remove:noop,toggle:noop,contains:()=>fa
 const segButtons=[
   Object.assign(el(),{dataset:{st:"-1"}}),
   Object.assign(el(),{dataset:{st:"1"}})];
+const modeButtons=[Object.assign(el(),{dataset:{md:"endless"}}),
+                   Object.assign(el(),{dataset:{md:"time"}})];
+const startButtons=[Object.assign(el(),{dataset:{ps:"0"}}),
+                    Object.assign(el(),{dataset:{ps:"1"}})];
 const document={getElementById:id=>elStore[id]||(elStore[id]=el()),
-  body:{appendChild:noop},querySelectorAll:sel=>(sel===".seg-b"?segButtons:[]),
+  body:{appendChild:noop},querySelectorAll:sel=>(sel===".seg-b"?segButtons:sel===".mode-b"?modeButtons:
+    sel===".start-b"?startButtons:[]),
   createElement:el,addEventListener:noop};
 const store={};
 const localStorage={getItem:k=>(k in store?store[k]:null),setItem:(k,v)=>{store[k]=String(v);},
@@ -89,6 +96,7 @@ const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},hei
   "JOY_R,DEAD_C,DEAD_T,GRAB_PUSH,joyHome,TIME,poseRider,WAIST,ARM_REST,GRABS,"+
   "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD,"+
   "findRail,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding,"+
-  "nextParkBand,MAXP,MAXB,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP};";
+  "nextParkBand,MAXP,MAXB,terrainKey,get PARK_START(){return PARK_START},"+
+  "setParkStart,loadParkStart,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP};";
 vm.runInContext(code+exportLine,sandbox,{filename:"game.js"});
 module.exports=sandbox;

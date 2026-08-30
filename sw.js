@@ -1,4 +1,4 @@
-const CACHE = "powderline-v1";
+const CACHE = "powderline-v2";
 const CORE = [
   "./", "./index.html", "./manifest.webmanifest", "./icon.svg",
   "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"

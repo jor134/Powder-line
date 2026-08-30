@@ -126,7 +126,7 @@
     text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
   #reelHint{font-size:10px;font-weight:800;letter-spacing:.15em;opacity:.65;color:#0b1f2f;
     text-shadow:0 1px 0 rgba(255,255,255,.75)}
-  .seg-b.sel,.mode-b.sel{background:#7fe3ff;color:#08202f;box-shadow:0 4px 0 #3fa9cc}
+  .seg-b.sel,.mode-b.sel,.start-b.sel{background:#7fe3ff;color:#08202f;box-shadow:0 4px 0 #3fa9cc}
   #goal.timer{font-size:30px;letter-spacing:.04em;font-weight:900;margin-top:2px}
   #goal.timer.low{color:#a8321a}
   .seg{margin-top:2px}
@@ -182,6 +182,13 @@
     <div class="row">
       <button class="sm ghost mode-b" data-md="endless">FIRST TO 10K</button>
       <button class="sm ghost mode-b" data-md="time">2 MIN ATTACK</button>
+    </div>
+  </div>
+  <div class="seg" id="startSeg">
+    <div class="lbl" style="margin-bottom:6px">DROP IN</div>
+    <div class="row">
+      <button class="sm ghost start-b" data-ps="0">OPEN MOUNTAIN</button>
+      <button class="sm ghost start-b" data-ps="1">STUNT PARK</button>
     </div>
   </div>
   <div class="seg" id="stanceSeg">
@@ -285,11 +292,14 @@ function vnoise(x,y,s){
 
 /* ---------- terrain feature bands ---------- */
 const FEAT=["open","cliff","glade","park","boulder","cliff","open","glade","park","cliff","boulder","open"];
+let PARK_START=false;
 function featOf(b){
+  if(PARK_START&&(b===1||b===2)) return "park";   // drop straight into a 200m park
   if(b<1) return "open";
   if(b===3) return "park";          // every mountain has a park within the first 400m
   return FEAT[Math.floor(hash2(b,7,SEED)*FEAT.length)%FEAT.length];
 }
+function terrainKey(){ return SEED+(PARK_START?7777777:0); }
 function nextParkBand(z){
   const b=Math.max(0,Math.floor(z/CS));
   for(let i=0;i<14;i++) if(featOf(b+i)==="park") return b+i;
@@ -301,14 +311,16 @@ function dropOf(b){
 }
 let _cum=[0], _cumSeed=null;
 function cumDrop(b){
-  if(_cumSeed!==SEED){ _cum=[0]; _cumSeed=SEED; }
+  const key=terrainKey();
+  if(_cumSeed!==key){ _cum=[0]; _cumSeed=key; }
   while(_cum.length<=b){const i=_cum.length;_cum.push(_cum[i-1]+dropOf(i-1));}
   return _cum[b];
 }
 
 let _park={}, _parkSeed=null;
 function parkKickers(b){
-  if(_parkSeed!==SEED){ _park={}; _parkSeed=SEED; }
+  const key=terrainKey();
+  if(_parkSeed!==key){ _park={}; _parkSeed=key; }
   let k=_park[b];
   if(!k){
     k=[];
@@ -384,7 +396,7 @@ function toonMap(steps){
 }
 const G3=toonMap(3), G4=toonMap(4);
 const MAT={
-  snow:new THREE.MeshToonMaterial({color:0xf4f9ff,gradientMap:G4}),
+  snow:new THREE.MeshToonMaterial({color:0xffffff,gradientMap:G4,vertexColors:true}),
   pine:new THREE.MeshToonMaterial({color:0x1f4a3a,gradientMap:G3,flatShading:true}),
   bark:new THREE.MeshToonMaterial({color:0x3a2a22,gradientMap:G3}),
   rock:new THREE.MeshToonMaterial({color:0x59636e,gradientMap:G3,flatShading:true}),
@@ -466,6 +478,8 @@ class Chunk{
   constructor(){
     const g=new THREE.PlaneBufferGeometry(CW,CS,SEGX,SEGZ);
     g.rotateX(-Math.PI/2);
+    const vc=new Float32Array(g.attributes.position.array.length);
+    g.setAttribute("color",new THREE.BufferAttribute(vc,3));
     this.mesh=new THREE.Mesh(g,MAT.snow); this.mesh.frustumCulled=false; scene.add(this.mesh);
     this.trees=new THREE.InstancedMesh(pineGeo,MAT.pine,MAXT);
     this.tOut=new THREE.InstancedMesh(pineGeo,MAT.ink,MAXT);
@@ -484,12 +498,29 @@ class Chunk{
   build(b){
     this.band=b;
     const pos=this.mesh.geometry.attributes.position, arr=pos.array;
-    const z0=b*CS;
+    const col=this.mesh.geometry.attributes.color, carr=col.array;
+    const z0=b*CS, isPark=featOf(b)==="park";
     for(let i=0;i<arr.length;i+=3){
       const x=arr[i], z=z0+CS*0.5+arr[i+2];
       arr[i+1]=heightAt(x,z);
+      // untextured white snow hides a 4m ramp completely, so groomed park features
+      // are tinted: cool blue-grey for the ramp, a warm stripe across the takeoff lip
+      let r=0.957,g2=0.976,b2=1.0;
+      if(isPark){
+        const lz=z-z0, k=kickerAt(b,x,lz);
+        if(k>0.25){
+          const t=Math.min(0.62,k/4.6);
+          r=r*(1-t)+0.706*t; g2=g2*(1-t)+0.796*t; b2=b2*(1-t)+0.878*t;
+          const ks=parkKickers(b);
+          for(const kk of ks){
+            const u=lz-kk.kz;
+            if(u>-2.6&&u<0.9&&Math.abs(x-kk.xc)<13){ r=1.0; g2=0.796; b2=0.541; break; }
+          }
+        }
+      }
+      carr[i]=r; carr[i+1]=g2; carr[i+2]=b2;
     }
-    pos.needsUpdate=true;
+    pos.needsUpdate=true; col.needsUpdate=true;
     this.mesh.geometry.computeVertexNormals();
     this.mesh.position.set(0,0,z0+CS*0.5);
 
@@ -918,7 +949,7 @@ const P={
   score:0, combo:0, comboT:0, crash:0, alive:true
 };
 function resetPlayer(){
-  _cum=[0]; _cumSeed=SEED;
+  _cum=[0]; _cumSeed=terrainKey(); _park={}; _parkSeed=terrainKey();
   // a new seed means a new mountain: band numbers repeat, so force every slot to rebuild
   chunks.forEach(c=>{ c.band=-1; c.all.forEach(m=>m.visible=false); });
   P.pos.set(0,heightAt(0,0),0); P.yaw=0; P.speed=9; P.vy=0; P.air=false; P.airT=0;
@@ -1265,7 +1296,8 @@ function onNet(m,peer){
     if(NET.mode==="host"){
       NET.peers.forEach(p=>{ if(p!==peer&&p.dc&&p.dc.readyState==="open"){ try{p.dc.send(JSON.stringify(m));}catch(e){} } });
     }
-  }else if(m.t==="go"){ SEED=m.seed; if(m.md){ MODE=m.md; paintMode(); } startRun(false); }
+  }else if(m.t==="go"){ SEED=m.seed; if(m.md){ MODE=m.md; paintMode(); }
+    PARK_START=!!m.ps; paintParkStart(); startRun(false); }
   else if(m.t==="win"){ if(!NET.winner){ NET.winner={name:m.n,score:m.s};
     if(NET.mode==="host") sendAll(m); endRun(); } }
 }
@@ -1378,6 +1410,21 @@ function clockText(sec){
   return Math.floor(s2/60)+":"+String(s2%60).padStart(2,"0");
 }
 
+/* ---------- drop-in location ---------- */
+function paintParkStart(){
+  document.querySelectorAll(".start-b").forEach(b=>
+    b.classList.toggle("sel",(b.dataset.ps==="1")===PARK_START));
+}
+function loadParkStart(){
+  try{ PARK_START=localStorage.getItem("pl_parkstart")==="1"; }catch(e){}
+  paintParkStart();
+}
+function setParkStart(on){
+  PARK_START=!!on;
+  try{ localStorage.setItem("pl_parkstart",PARK_START?"1":"0"); }catch(e){}
+  paintParkStart();
+}
+
 /* ---------- stance preference ---------- */
 let STANCE=REGULAR;
 function loadStance(){
@@ -1438,7 +1485,7 @@ function recClose(){
 /* ---------- game state ---------- */
 let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0, hintsT=0;
 function startRun(broadcast){
-  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE});
+  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE,ps:PARK_START?1:0});
   NET.winner=null; NET.started=true; lastPip=0; recReset();
   $("reel").classList.add("hide");
   ghosts.forEach(o=>o.score=0);
@@ -1640,9 +1687,10 @@ if("serviceWorker" in navigator) addEventListener("load",()=>navigator.serviceWo
 document.querySelectorAll(".seg-b").forEach(b=>
   b.onclick=()=>setStance(parseInt(b.dataset.st,10)));
 document.querySelectorAll(".mode-b").forEach(b=>b.onclick=()=>setMode(b.dataset.md));
+document.querySelectorAll(".start-b").forEach(b=>b.onclick=()=>setParkStart(b.dataset.ps==="1"));
 
 /* ---------- boot ---------- */
-loadStance(); loadMode(); joyHome(); resetPlayer(); stepCamera(0.016,true);
+loadStance(); loadMode(); loadParkStart(); joyHome(); resetPlayer(); stepCamera(0.016,true);
 requestAnimationFrame(frame);
 </script>
 </body>

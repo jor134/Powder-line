@@ -686,6 +686,61 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
      "a 6-minute run holds at most "+total+" recorded frames, not the whole run");
 }
 
+/* 28 — the park has to be VISIBLE, not merely present.
+   A 20deg ramp on a 22deg slope in untextured white snow is invisible, so groomed
+   features are vertex-tinted. */
+{
+  G.setSeed(1337); G.setParkStart(false); G.resetPlayer();
+  G.syncChunks(350);
+  const park=G.chunks.find(c=>c.band===3);
+  const plain=G.chunks.find(c=>c.band===2);   // open snow, loaded alongside the park
+  ok(!!park.mesh.geometry.attributes.color,"terrain carries a colour attribute");
+  const pc=park.mesh.geometry.attributes.color.array;
+  const oc=plain.mesh.geometry.attributes.color.array;
+  const uniq=new Set();
+  for(let i=0;i<pc.length;i+=3) uniq.add(pc[i].toFixed(3)+","+pc[i+1].toFixed(3));
+  const plainUniq=new Set();
+  for(let i=0;i<oc.length;i+=3) plainUniq.add(oc[i].toFixed(3)+","+oc[i+1].toFixed(3));
+  ok(plainUniq.size===1,"open snow is a single flat tone");
+  ok(uniq.size>=3,"a park band paints ramp and lip tones as well as snow ("+uniq.size+" tones)");
+  let ramp=0, lip=0;
+  for(let i=0;i<pc.length;i+=3){
+    if(pc[i]>0.99&&pc[i+1]<0.85) lip++;
+    else if(pc[i]<0.95) ramp++;
+  }
+  ok(ramp>20,"the ramp face is tinted across "+ramp+" vertices");
+  ok(lip>0,"the takeoff lip carries a warm marker stripe ("+lip+" vertices)");
+}
+
+/* 29 — dropping straight into the park */
+{
+  G.setSeed(1337);
+  G.setParkStart(false);
+  const normal=[0,1,2,3].map(b=>G.featOf(b));
+  const keyOff=G.terrainKey();
+  G.setParkStart(true);
+  ok(G.PARK_START===true,"the option turns on");
+  ok(G.featOf(1)==="park"&&G.featOf(2)==="park","bands 1 and 2 become a 200m park");
+  ok(G.featOf(0)==="open","band 0 stays open so you can build speed into it");
+  ok(G.terrainKey()!==keyOff,
+     "the terrain cache key changes, so cliff and kicker caches cannot go stale");
+  G.loadParkStart();
+  ok(G.PARK_START===true,"the choice is remembered across a reload");
+
+  // the park you drop into must actually be reachable at speed
+  G.setParkStart(true); G.resetPlayer();
+  const P=G.P, IN=G.IN;
+  let reached=0, air=0;
+  for(let i=0;i<60*30;i++){
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
+    if(P.pos.z>100&&P.pos.z<300){ reached++; if(P.air) air++; }
+  }
+  ok(reached>0,"the rider reaches the park without steering");
+  ok(air>30,"and gets airborne inside it ("+(air/60).toFixed(1)+"s of air)");
+  G.setParkStart(false);
+}
+
 /* 19 — a stick with no thumb on it never writes input */
 {
   const IN=G.IN;
