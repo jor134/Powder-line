@@ -51,7 +51,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setSeed(1337); G.resetPlayer();
   const P=G.P, IN=G.IN; let nan=false,maxS=0,airFrames=0;
   for(let i=0;i<60*90;i++){
-    IN.carve=0;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
     G.syncChunks(P.pos.z); G.stepPlayer(1/60);
     if(!isFinite(P.speed)||!isFinite(P.pos.y)||!isFinite(P.pos.x)) {nan=true;break;}
     maxS=Math.max(maxS,P.speed); if(P.air) airFrames++;
@@ -87,7 +87,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setSeed(1337); G.resetPlayer();
   const P=G.P,IN=G.IN; let t=0,jumps=0;
   for(let i=0;i<60*600&&P.score<G.GOAL;i++){
-    IN.carve=0;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
     if(!P.air&&P.crash<=0&&i%110===0){IN.jump=true;jumps++;}
     if(P.air&&P.airT>0.15){
       const gap=P.pos.y-G.heightAt(P.pos.x,P.pos.z);
@@ -149,7 +149,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
     G.setSeed(sd); G.resetPlayer();
     const P=G.P,IN=G.IN;
     for(let i=0;i<60*180;i++){
-      IN.carve=Math.sin(i/95)*0.7;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+      IN.carve=Math.sin(i/95)*0.7;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
       if(!P.air&&P.crash<=0&&i%110===0)IN.jump=true;
       G.stepPlayer(1/60); G.syncChunks(P.pos.z);
       if(G.chunks.some(c=>c.band<0)) unbuilt++;
@@ -263,13 +263,13 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setSeed(1337); G.resetPlayer();
   const P=G.P,IN=G.IN;
   const y0=P.yaw;
-  for(let i=0;i<40;i++){ IN.carve=1;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+  for(let i=0;i<40;i++){ IN.carve=1;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
     G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); }
   ok(P.yaw<y0,"stick right decreases yaw");
   ok(P.pos.x<-0.5,"stick right actually moves the rider to screen-right (x="+P.pos.x.toFixed(1)+")");
   ok(P.roll>0,"the rider leans into the turn rather than away from it");
   G.setSeed(1337); G.resetPlayer();
-  const x1=(()=>{ for(let i=0;i<40;i++){ IN.carve=-1;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+  const x1=(()=>{ for(let i=0;i<40;i++){ IN.carve=-1;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
     G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);} return P.pos.x; })();
   ok(x1>0.5,"stick left moves the rider to screen-left (x="+x1.toFixed(1)+")");
 }
@@ -279,7 +279,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setSeed(1337); G.resetPlayer();
   const P=G.P,IN=G.IN;
   P.air=true; P.vy=9; P.airT=0; P.spinAcc=0;
-  IN.carve=0;IN.flip=0;IN.grab=false;IN.jump=false; IN.spin=1;
+  IN.carve=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false; IN.spin=1;
   for(let i=0;i<20;i++){ G.stepPlayer(G.TIME/60); if(!P.air) break; }
   ok(P.spinAcc<0,"pushing the trick stick right spins the rider right");
 }
@@ -289,12 +289,12 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(G.TIME>0.85&&G.TIME<1.0,"global time runs at "+(G.TIME*100).toFixed(0)+"% speed");
   G.setSeed(1337); G.resetPlayer();
   const P=G.P,IN=G.IN;
-  for(let i=0;i<180;i++){ IN.carve=0;IN.spin=0;IN.flip=0;IN.grab=false;IN.jump=false;
+  for(let i=0;i<180;i++){ IN.carve=0;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
     G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); }        // build speed on the flat
   const ground=G.heightAt(P.pos.x,P.pos.z);
   IN.jump=true; G.stepPlayer(G.TIME/60);
   let peak=0,steps=0;
-  while(P.air&&steps<400){ IN.jump=false;IN.carve=0;IN.spin=0;IN.flip=0;IN.grab=false;
+  while(P.air&&steps<400){ IN.jump=false;IN.carve=0;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;
     peak=Math.max(peak,P.pos.y-G.heightAt(P.pos.x,P.pos.z));
     G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); steps++; }
   const hang=steps/60;
@@ -324,7 +324,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
     return shy + (y2*Math.cos(bend)-z2*Math.sin(bend));
   };
   const deckY=()=>u.lower.position.y+0.05;
-  const settle=(grab,gap)=>{ for(let i=0;i<120;i++) G.poseRider(r,1/60,grab,true,0,gap); };
+  const settle=(grab,gap)=>{ for(let i=0;i<120;i++) G.poseRider(r,1/60,{grab:grab,air:true,gap:gap}); };
 
   settle(false,20);
   const rest={bend:u.upper.rotation.x,hip:u.stance.position.y,leg:u.legF.scale.y,
@@ -353,27 +353,90 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
    floating above the physics contact point. */
 {
   const r=G.buildRider(0x7fe3ff,0xff6b4a,G.REGULAR), u=r.userData;
-  for(let i=0;i<120;i++) G.poseRider(r,1/60,true,true,0,20);   // deep in the air, fully tucked
+  for(let i=0;i<120;i++) G.poseRider(r,1/60,{grab:true,air:true,gap:20});   // deep in the air, fully tucked
   ok(u.lower.position.y>0.25,"board is tucked at altitude");
-  for(let i=0;i<120;i++) G.poseRider(r,1/60,true,true,0,0.6);  // grab still held, ground arriving
+  for(let i=0;i<120;i++) G.poseRider(r,1/60,{grab:true,air:true,gap:0.6});  // grab still held, ground arriving
   ok(u.lower.position.y<0.02,"board has returned to the feet before touchdown ("+
      u.lower.position.y.toFixed(3)+"m)");
   ok(u.stance.position.y>-0.05,"rider has stood back up to absorb the landing");
 }
 
-/* 18g — REGRESSION: grabbing after a spin. The old rule keyed off "never moved since
-   touch-down", so any player who spun first could never trigger a grab. */
+/* 18g — grabs must be combinable with spins and flips.
+   The old rule required the trick stick to be parked, so a grab and a flip were
+   mutually exclusive by construction. The grab hand is now the LEFT stick. */
 {
   const IN=G.IN;
-  G.JOY.L.touch=null;
-  G.JOY.R.touch={id:1,x0:0,y0:0,t0:performance.now()-800,moved:70};   // spun hard, then re-centred
-  G.JOY.R.dx=0; G.JOY.R.dy=0;
-  IN.grab=false; G.readTouch();
-  ok(IN.grab===true,"a re-centred stick grabs even after a big spin input");
-  G.JOY.R.dx=40; G.JOY.R.dy=0;
-  IN.grab=false; G.readTouch();
-  ok(IN.grab===false,"a stick held out to the side spins instead of grabbing");
-  G.JOY.R.touch=null;
+  G.JOY.R.touch={id:1,x0:0,y0:0,t0:performance.now()-800,moved:70};
+  G.JOY.R.dx=0; G.JOY.R.dy=-45;                       // trick stick pushed up: front flip
+  G.JOY.L.touch={id:2,x0:0,y0:0,t0:performance.now()-800,moved:40};
+  G.JOY.L.dx=0; G.JOY.L.dy=40;                        // grab stick pushed down: indy
+  IN.hold=false; IN.grabL=false; G.readTouch();
+  ok(IN.flip>0.5,"trick stick still drives the flip while grabbing ("+IN.flip.toFixed(2)+")");
+  ok(IN.grabL===true,"left stick registers a grab at the same time");
+  ok(G.grabKindFrom(IN.grabDir)===0,"pushing down selects the indy");
+  ok(G.grabKindFrom(Math.PI/2)===1&&G.grabKindFrom(Math.PI)===2&&G.grabKindFrom(0)===3,
+     "up / left / right select method, mute and stalefish");
+  G.JOY.L.dx=0; G.JOY.L.dy=6; IN.grabL=false; G.readTouch();
+  ok(IN.grabL===false,"a barely-nudged left stick steers instead of grabbing");
+  G.JOY.L.touch=null; G.JOY.R.touch=null;
+}
+
+/* 18i — the speed tuck */
+{
+  G.setSeed(1337); G.resetPlayer();
+  const P=G.P,IN=G.IN;
+  const run=hold=>{
+    G.setSeed(1337); G.resetPlayer();
+    let top=0,tuckFrames=0;
+    for(let i=0;i<60*60;i++){
+      IN.carve=0;IN.spin=0;IN.flip=0;IN.grabL=false;IN.jump=false;IN.hold=hold;
+      G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
+      if(!P.air){ top=Math.max(top,P.speed); if(P.tucking) tuckFrames++; }
+    }
+    return {top,tuckFrames,dist:P.pos.z};
+  };
+  const open=run(false), tucked=run(true);
+  ok(open.tuckFrames===0,"no tuck unless the stick is held");
+  ok(tucked.tuckFrames>1000,"tuck engages and stays engaged while held ("+tucked.tuckFrames+" frames)");
+  ok(tucked.top>open.top*1.12,"tucking is meaningfully faster ("+(open.top*3.6).toFixed(0)+" -> "+
+     (tucked.top*3.6).toFixed(0)+" km/h)");
+  ok(tucked.dist>open.dist*1.08,"and covers more mountain per minute ("+
+     (open.dist/1000).toFixed(2)+" -> "+(tucked.dist/1000).toFixed(2)+" km)");
+  // steering authority must be the cost
+  G.setSeed(1337); G.resetPlayer();
+  for(let i=0;i<120;i++){ IN.carve=1;IN.spin=0;IN.flip=0;IN.grabL=false;IN.jump=false;IN.hold=false;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); }
+  const openTurn=Math.abs(P.yaw);
+  G.setSeed(1337); G.resetPlayer();
+  for(let i=0;i<120;i++){ IN.carve=1;IN.spin=0;IN.flip=0;IN.grabL=false;IN.jump=false;IN.hold=true;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); }
+  ok(Math.abs(P.yaw)<openTurn*0.75,"a tucked rider gives up steering ("+
+     (openTurn*57.3).toFixed(0)+"° vs "+(Math.abs(P.yaw)*57.3).toFixed(0)+"°)");
+}
+
+/* 18j — grab types carry different value, and the pose differs per grab */
+{
+  ok(G.GRABS.length===4,"four named grabs");
+  ok(G.GRABS[0].mult===1&&G.GRABS[1].mult>1.2,"the method is worth more than the indy");
+  const r=G.buildRider(0x7fe3ff,0xff6b4a,G.REGULAR),u=r.userData;
+  for(let i=0;i<120;i++) G.poseRider(r,1/60,{grab:true,kind:0,air:true,gap:20});
+  const indy={aR:u.armR.rotation.x,aL:u.armL.rotation.x,twist:u.upper.rotation.z};
+  for(let i=0;i<120;i++) G.poseRider(r,1/60,{grab:true,kind:1,air:true,gap:20});
+  const method={aR:u.armR.rotation.x,aL:u.armL.rotation.x,twist:u.upper.rotation.z};
+  ok(Math.abs(indy.aR-indy.aL)<0.01,"an indy reaches with both hands");
+  ok(method.aL<method.aR-0.4,"a method reaches with one hand and leaves the other high");
+  ok(Math.abs(method.twist)>0.2,"a method twists the body, an indy does not ("+
+     indy.twist.toFixed(2)+" vs "+method.twist.toFixed(2)+")");
+}
+
+/* 18k — time attack */
+{
+  ok(G.RUN_SECONDS===120,"time attack runs for two minutes");
+  ok(G.clockText(120)==="2:00"&&G.clockText(9)==="0:09"&&G.clockText(-3)==="0:00",
+     "the clock formats and floors at zero");
+  G.setMode("time"); ok(G.MODE==="time","mode switches to time attack");
+  G.loadMode(); ok(G.MODE==="time","mode is remembered across a reload");
+  G.setMode("endless"); ok(G.MODE==="endless","mode switches back");
 }
 
 /* 19 — a stick with no thumb on it never writes input */

@@ -102,7 +102,9 @@
   .lbl{font-size:10px;letter-spacing:.2em;font-weight:800;opacity:.6}
   #results{font-size:15px;line-height:1.9;font-weight:700}
   #results .win{color:#ffd97f}
-  .seg-b.sel{background:#7fe3ff;color:#08202f;box-shadow:0 4px 0 #3fa9cc}
+  .seg-b.sel,.mode-b.sel{background:#7fe3ff;color:#08202f;box-shadow:0 4px 0 #3fa9cc}
+  #goal.timer{font-size:30px;letter-spacing:.04em;font-weight:900;margin-top:2px}
+  #goal.timer.low{color:#a8321a}
   .seg{margin-top:2px}
   .foot{font-size:10px;opacity:.45;letter-spacing:.12em;line-height:1.7}
   #lobbyList{font-size:12px;line-height:1.8;opacity:.9}
@@ -118,8 +120,8 @@
 
 <div id="zones" class="hide">
   <div id="zL"></div><div id="zR"></div>
-  <div class="hint" id="hintL">LEFT STICK STEERS</div>
-  <div class="hint" id="hintR">TAP JUMP · PUSH SPIN · HOLD GRAB</div>
+  <div class="hint" id="hintL">STEER · PUSH IN AIR TO GRAB</div>
+  <div class="hint" id="hintR">TAP JUMP · PUSH SPIN · HOLD TUCK</div>
   <div class="joy" id="stickL"><div class="ring"></div><div class="knob" id="knobL"></div><div class="cap">CARVE</div></div>
   <div class="joy" id="stickR"><div class="ring"></div><div class="knob" id="knobR"></div><div class="cap">TRICK</div></div>
 </div>
@@ -145,6 +147,13 @@
   <button id="bSolo">RIDE SOLO</button>
   <button id="bMulti" class="ghost">RIDE WITH FRIENDS</button>
   <button id="bInstall" class="ghost hide">INSTALL APP</button>
+  <div class="seg" id="modeSeg">
+    <div class="lbl" style="margin-bottom:6px">MODE</div>
+    <div class="row">
+      <button class="sm ghost mode-b" data-md="endless">FIRST TO 10K</button>
+      <button class="sm ghost mode-b" data-md="time">2 MIN ATTACK</button>
+    </div>
+  </div>
   <div class="seg" id="stanceSeg">
     <div class="lbl" style="margin-bottom:6px">STANCE</div>
     <div class="row">
@@ -152,7 +161,7 @@
       <button class="sm ghost seg-b" data-st="1">GOOFY</button>
     </div>
   </div>
-  <div class="foot">BOTH STICKS FLOAT — PUT YOUR THUMB ANYWHERE<br>LEFT CARVES · RIGHT TAPS TO JUMP, PUSHES TO SPIN, HOLDS TO GRAB<br>DESKTOP: A/D · SPACE · ARROWS · SHIFT</div>
+  <div class="foot">BOTH STICKS FLOAT — PUT YOUR THUMB ANYWHERE<br>LEFT CARVES · RIGHT TAPS TO JUMP AND PUSHES TO SPIN<br>HOLD RIGHT ON SNOW TO TUCK · PUSH LEFT IN THE AIR TO GRAB<br>DOWN INDY · UP METHOD · LEFT MUTE · RIGHT STALEFISH</div>
 </div>
 
 <div id="mp" class="panel hide">
@@ -197,6 +206,19 @@
 
 const GOAL = 10000;
 const TIME = 0.90;          // global slow-motion factor
+const RUN_SECONDS = 120;    // time attack length
+const GRABS=[
+  {n:"INDY",     mult:1.00, aR:1.00, aL:1.00, twist: 0.00, tweak: 0.00},
+  {n:"METHOD",   mult:1.30, aR:0.15, aL:1.00, twist:-0.35, tweak: 0.30},
+  {n:"MUTE",     mult:1.10, aR:1.00, aL:0.25, twist: 0.20, tweak: 0.00},
+  {n:"STALEFISH",mult:1.15, aR:0.25, aL:1.00, twist:-0.20, tweak:-0.15}
+];
+function grabKindFrom(angle){          // stick direction -> grab
+  if(angle>Math.PI*0.25&&angle<Math.PI*0.75) return 1;      // up
+  if(angle>Math.PI*0.75||angle<-Math.PI*0.75) return 2;     // left
+  if(angle>=-Math.PI*0.25&&angle<=Math.PI*0.25) return 3;   // right
+  return 0;                                                 // down
+}
 const CS = 100;            // chunk length (m) along fall line
 const CW = 220;            // chunk width (m)
 const SEGZ = 88, SEGX = 48;
@@ -610,7 +632,7 @@ function blip(freq,dur,type,vol){
 }
 
 /* ---------- input ---------- */
-const IN={carve:0,spin:0,flip:0,jump:false,grab:false};
+const IN={carve:0,spin:0,flip:0,jump:false,hold:false,grabL:false,grabDir:0};
 const keys={};
 addEventListener("keydown",e=>{
   keys[e.code]=true;
@@ -621,7 +643,8 @@ function readKeys(){
   IN.carve=(keys.KeyD?1:0)-(keys.KeyA?1:0);
   IN.spin=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0);
   IN.flip=(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
-  IN.grab=!!(keys.ShiftLeft||keys.ShiftRight);
+  IN.hold=!!(keys.ShiftLeft||keys.ShiftRight);   // tuck on snow, grab in the air
+  IN.grabL=false; IN.grabDir=0;
 }
 
 /* ---------- floating joysticks ---------- */
@@ -632,7 +655,7 @@ const JOY={
   R:{el:document.getElementById("stickR"),knob:document.getElementById("knobR"),
      home:null,touch:null,dx:0,dy:0}
 };
-const JOY_R=52, DEAD_C=7, DEAD_T=11;
+const JOY_R=52, DEAD_C=7, DEAD_T=11, GRAB_PUSH=26;
 function joyHome(){
   const m=Math.max(76,Math.min(122,innerWidth*0.20));
   const y=innerHeight-Math.max(96,innerHeight*0.17);
@@ -664,9 +687,10 @@ function bindZone(el,which){
   });
   const end=e=>{
     if(!j.touch||j.touch.id!==e.pointerId) return;
-    if(which==="R"&&j.touch.moved<16&&performance.now()-j.touch.t0<260) IN.jump=true;
+    if(which==="R"&&j.touch.moved<16&&performance.now()-j.touch.t0<200) IN.jump=true;
     j.touch=null; j.dx=0; j.dy=0;
     j.el.classList.remove("live"); j.el.classList.remove("grabbing");
+    if(which==="L"){ IN.grabL=false; } else { IN.hold=false; }
     knobTo(j,0,0);
     placeJoy(j,j.home[0],j.home[1]);
   };
@@ -678,27 +702,36 @@ function axis(v,dead){ const s=Math.sign(v), m=Math.abs(v);
   return m<dead?0:clamp(s*(m-dead)/(JOY_R-dead),-1,1); }
 function readTouch(){
   const L=JOY.L, R=JOY.R;
-  if(L.touch) IN.carve=axis(L.dx,DEAD_C);
+  if(L.touch){
+    IN.carve=axis(L.dx,DEAD_C);
+    // pushed hard in the air, the left stick is the grab hand — direction picks the grab
+    if(Math.hypot(L.dx,L.dy)>GRAB_PUSH){
+      IN.grabL=true; IN.grabDir=Math.atan2(-L.dy,L.dx);
+    }
+    L.el.classList.toggle("grabbing",IN.grabL);
+  }
   if(R.touch){
     IN.spin=axis(R.dx,DEAD_T);
     IN.flip=axis(-R.dy,DEAD_T);
-    // judged on where the stick is NOW, not whether it ever moved — spin, re-centre, grab
-    IN.grab = Math.hypot(R.dx,R.dy) < DEAD_T+9 && performance.now()-R.touch.t0>140;
-    R.el.classList.toggle("grabbing",IN.grab);
+    // stick parked and held: tuck on the snow, plain grab in the air
+    IN.hold = Math.hypot(R.dx,R.dy) < DEAD_T+9 && performance.now()-R.touch.t0>220;
+    R.el.classList.toggle("grabbing",IN.hold);
   }
 }
 
 /* ---------- player ---------- */
 const P={
   pos:new THREE.Vector3(0,0,0), yaw:0, speed:8, vy:0, air:false, airT:0, maxAir:0,
-  spinAcc:0, flipAcc:0, roll:0, grabT:0, score:0, combo:0, comboT:0, crash:0, alive:true
+  spinAcc:0, flipAcc:0, roll:0, grabT:0, grabKind:0, tuckT:0, clock:0,
+  score:0, combo:0, comboT:0, crash:0, alive:true
 };
 function resetPlayer(){
   _cum=[0]; _cumSeed=SEED;
   // a new seed means a new mountain: band numbers repeat, so force every slot to rebuild
   chunks.forEach(c=>{ c.band=-1; c.all.forEach(m=>m.visible=false); });
   P.pos.set(0,heightAt(0,0),0); P.yaw=0; P.speed=9; P.vy=0; P.air=false; P.airT=0;
-  P.spinAcc=0; P.flipAcc=0; P.roll=0; P.grabT=0; P.score=0; P.combo=0; P.comboT=0; P.crash=0;
+  P.spinAcc=0; P.flipAcc=0; P.roll=0; P.grabT=0; P.grabKind=0; P.tuckT=0; P.clock=0;
+  P.score=0; P.combo=0; P.comboT=0; P.crash=0;
   syncChunks(0);
   P.pos.y=heightAt(0,0);
 }
@@ -706,44 +739,46 @@ function resetPlayer(){
 /* ---------- HUD ---------- */
 const $=id=>document.getElementById(id);
 const elScore=$("score"),elSpd=$("spd"),elTrick=$("trick"),elCombo=$("combo"),
-      elAir=$("air"),elBig=$("big"),elBar=$("barFill"),elBoard=$("board");
+      elAir=$("air"),elBig=$("big"),elBar=$("barFill"),elBoard=$("board"),elGoal=$("goal");
 let bigT=0,trickT=0;
 function showTrick(txt){ elTrick.textContent=txt; elTrick.classList.add("on"); trickT=1.5; }
 function showBig(txt,col){ elBig.textContent=txt; elBig.style.color=col||"#fff";
   elBig.classList.add("on"); bigT=1.1; }
 
 /* ---------- trick scoring ---------- */
-function trickName(halfSpins,flips,grabbed,switchLand){
+function trickName(halfSpins,flips,grabName,switchLand){
   const parts=[];
   if(flips>0) parts.push(flips>1?flips+"× FLIP":"FLIP");
   if(halfSpins>0) parts.push((halfSpins*180)+"");
-  if(grabbed) parts.push("GRAB");
+  if(grabName) parts.push(grabName);
   if(!parts.length) parts.push("AIR");
   return (switchLand?"SWITCH ":"")+parts.join(" · ");
 }
 function land(clean){
   const airT=P.airT;
   if(!clean){ wipeout(); return; }
-  if(airT<0.35){ P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0; return; }
+  if(airT<0.35){ P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0; P.grabKind=0; return; }
   const halfSpins=Math.round(Math.abs(P.spinAcc)/180);
   const flips=Math.round(Math.abs(P.flipAcc)/360);
   const sw=(halfSpins%2)===1;
-  const base=Math.floor(airT*33)+halfSpins*41+(halfSpins>=4?80:0)+flips*112+Math.floor(P.grabT*29)
+  const gk=GRABS[P.grabKind];
+  const grabPts=Math.floor(P.grabT*29*gk.mult);
+  const base=Math.floor(airT*33)+halfSpins*41+(halfSpins>=4?80:0)+flips*112+grabPts
              +(airT>2.6?70:0);
   P.combo=Math.min(P.combo+1,9);
   const mult=Math.min(1+0.22*(P.combo-1),2.6);
   const pts=Math.round(base*mult);
   P.score+=pts;
   P.comboT=4.5;
-  showTrick(trickName(halfSpins,flips,P.grabT>0.35,sw)+"  +"+pts);
+  showTrick(trickName(halfSpins,flips,P.grabT>0.35?gk.n:null,sw)+"  +"+pts);
   if(P.combo>1){ elCombo.textContent="COMBO ×"+mult.toFixed(1); elCombo.classList.add("on"); }
   blip(430+halfSpins*70,0.16,"triangle",0.11);
   if(airT>2.4) showBig("STOMPED","#0d5a78");
-  P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0;
+  P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0; P.grabKind=0;
 }
 function wipeout(){
   P.speed*=0.28; P.crash=1.1; P.combo=0; P.comboT=0;
-  P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0;
+  P.airT=0; P.spinAcc=0; P.flipAcc=0; P.grabT=0; P.grabKind=0;
   elCombo.classList.remove("on");
   showBig("WIPEOUT","#a8321a");
   blip(90,0.4,"sawtooth",0.16);
@@ -761,23 +796,32 @@ function stepPlayer(dt){
   const grounded=!P.air;
 
   if(grounded){
-    const turn=(1.05+1.5*Math.max(0,1-P.speed/46));
+    P.tucking = IN.hold && P.crash<=0;
+    if(P.tucking) P.tuckT+=dt; else P.tuckT=0;
+    // a tuck trades steering authority for a much lower drag coefficient
+    const turn=(1.05+1.5*Math.max(0,1-P.speed/46))*(P.tucking?0.45:1);
     if(P.crash<=0) P.yaw-=IN.carve*turn*dt;
-    P.roll=lerp(P.roll, IN.carve*0.55*Math.min(1,P.speed/22),dt*8);
+    P.roll=lerp(P.roll, IN.carve*0.55*Math.min(1,P.speed/22)*(P.tucking?0.5:1),dt*8);
     const a=G*n.y*(n.x*f.x+n.z*f.z);
     P.speed+=a*dt;
-    P.speed-=(0.06*P.speed+3.0*Math.abs(IN.carve)+1.1)*dt;
-    P.speed-=0.007*P.speed*P.speed*dt;
+    const carveDrag=(P.tucking?1.6:3.0)*Math.abs(IN.carve);
+    P.speed-=(0.06*P.speed+carveDrag+(P.tucking?0.60:1.1))*dt;
+    P.speed-=(P.tucking?0.0042:0.007)*P.speed*P.speed*dt;
     P.speed=Math.max(0,P.speed);
     if(IN.jump&&P.crash<=0){ P.vy=10.6+P.speed*0.145; P.air=true; blip(300,0.11,"square",0.09); }
     IN.jump=false;
   }else{
+    P.tucking=false; P.tuckT=0;
     P.airT+=dt; P.maxAir=Math.max(P.maxAir,P.airT);
     P.vy-=G*dt;
-    P.yaw-=IN.carve*0.5*dt;
+    if(!IN.grabL) P.yaw-=IN.carve*0.5*dt;   // the left stick is grabbing, not steering
     P.spinAcc-=IN.spin*430*dt;
     P.flipAcc+=IN.flip*400*dt;
-    if(IN.grab){ P.grabT+=dt; }
+    P.grabbing = IN.hold || IN.grabL;
+    if(P.grabbing){
+      P.grabKind = IN.grabL ? grabKindFrom(IN.grabDir) : 0;
+      P.grabT+=dt;
+    }
     // landing assist: as the ground rushes up, rotation eases toward the nearest clean angle
     const gap=P.pos.y-heightAt(P.pos.x,P.pos.z);
     if(gap<4.5&&P.vy<0){
@@ -785,7 +829,7 @@ function stepPlayer(dt){
       P.spinAcc=lerp(P.spinAcc,Math.round(P.spinAcc/180)*180,k);
       P.flipAcc=lerp(P.flipAcc,Math.round(P.flipAcc/360)*360,k);
     }
-    P.roll=lerp(P.roll,IN.grab?0.35:0,dt*6);
+    P.roll=lerp(P.roll,P.grabbing?(0.35+GRABS[P.grabKind].tweak):0,dt*6);
     P.speed-=0.0018*P.speed*P.speed*dt;
     IN.jump=false;
   }
@@ -842,30 +886,40 @@ function stepPlayer(dt){
   rider.rotation.y=P.yaw+P.spinAcc*Math.PI/180;
   rider.rotation.x=P.flipAcc*Math.PI/180;
   rider.rotation.z=P.roll;
-  poseRider(rider,dt,IN.grab&&P.air,P.air,Math.abs(IN.carve),P.pos.y-gh2);
+  poseRider(rider,dt,{grab:P.air&&P.grabbing,kind:P.grabKind,tuck:!P.air&&P.tucking,
+                      air:P.air,carve:Math.abs(IN.carve),gap:P.pos.y-gh2});
 }
 
 /* Grab pose: the rider drops his hips, folds at the waist and reaches both hands
    down past the knees. Without the crouch the arms simply can't reach the deck. */
-function poseRider(g,dt,grabbing,airborne,carveAmt,gap){
+function poseRider(g,dt,o){
   const u=g.userData, k=Math.min(1,dt*9);
+  const air=!!o.air, carveAmt=o.carve||0;
   // the tuck eases out as the ground approaches, so the board is back under the
   // rider's feet before touchdown even if the grab is held all the way in
-  const room = gap===undefined ? 1 : clamp((gap-1.0)/2.5,0,1);
-  const a = grabbing ? room : 0;
+  const room = o.gap===undefined ? 1 : clamp((o.gap-1.0)/2.5,0,1);
+  const a = o.grab ? room : 0;                       // grab blend
+  const t = o.tuck ? 1 : 0;                          // speed-tuck blend
+  const gk = GRABS[o.kind||0];
+
   u.lower.position.y  = lerp(u.lower.position.y, 0.30*a, k);
-  u.upper.rotation.x  = lerp(u.upper.rotation.x, (airborne?0.06:0.24)+0.76*a, k);
-  u.stance.position.y = lerp(u.stance.position.y, -0.40*a, k);
-  const ls = lerp(u.legF.scale.y, 1-0.42*a, k);
+  u.upper.rotation.x  = lerp(u.upper.rotation.x, (air?0.06:0.24)+0.76*a+0.62*t, k);
+  u.upper.rotation.z  = lerp(u.upper.rotation.z, gk.twist*a, k);
+  u.stance.position.y = lerp(u.stance.position.y, -0.40*a-0.26*t, k);
+  const ls = lerp(u.legF.scale.y, 1-0.42*a-0.26*t, k);
   u.legF.scale.y=ls; u.legB.scale.y=ls;
-  const ly = lerp(u.legF.position.y, LEG_Y-0.16*a, k);
+  const ly = lerp(u.legF.position.y, LEG_Y-0.16*a-0.10*t, k);
   u.legF.position.y=ly; u.legB.position.y=ly;
+
   const outward = ARM_REST + carveAmt*0.22;
-  const az = lerp(Math.abs(u.armR.rotation.z), outward*(1-a)+0.15*a, k);
-  u.armR.rotation.z= az; u.armL.rotation.z=-az;
-  const ax = lerp(u.armR.rotation.x, -0.80*a, k);
-  u.armR.rotation.x=ax; u.armL.rotation.x=ax;
-  u.headG.rotation.x = lerp(u.headG.rotation.x, (airborne?-0.10:0.14)+0.42*a, Math.min(1,dt*6));
+  const rest = outward*(1-a-t) + 0.15*a + 0.10*t;
+  u.armR.rotation.z = lerp(u.armR.rotation.z,  rest, k);
+  u.armL.rotation.z = lerp(u.armL.rotation.z, -rest, k);
+  // during a grab each arm reaches by its own amount, which is what separates a
+  // method from an indy; tucking sweeps both arms back along the board instead
+  u.armR.rotation.x = lerp(u.armR.rotation.x, -0.80*a*gk.aR + 0.75*t, k);
+  u.armL.rotation.x = lerp(u.armL.rotation.x, -0.80*a*gk.aL + 0.75*t, k);
+  u.headG.rotation.x = lerp(u.headG.rotation.x, (air?-0.10:0.14)+0.42*a+0.30*t, Math.min(1,dt*6));
 }
 
 /* ---------- camera ---------- */
@@ -891,13 +945,14 @@ function ghostFor(id,name){
   const idx=ghosts.size%GCOL.length;
   const g=buildRider(0xffffff,GCOL[idx],REGULAR);
   g.rotation.order="YXZ"; scene.add(g);
-  const o={g,tx:0,ty:0,tz:0,tyaw:0,score:0,grab:false,airborne:false,
+  const o={g,tx:0,ty:0,tz:0,tyaw:0,score:0,grab:false,kind:0,tuck:false,airborne:false,
            name:name||("RIDER "+(idx+2)),col:GCOL[idx]};
   ghosts.set(id,o); return o;
 }
 function stepGhosts(dt){
   ghosts.forEach(o=>{
-    poseRider(o.g,dt,!!o.grab,!!o.airborne,0,o.ty-heightAt(o.tx,o.tz));
+    poseRider(o.g,dt,{grab:!!o.grab,kind:o.kind||0,tuck:!!o.tuck,air:!!o.airborne,
+                      carve:0,gap:o.ty-heightAt(o.tx,o.tz)});
     o.g.position.lerp(new THREE.Vector3(o.tx,o.ty-0.3,o.tz),Math.min(1,dt*9));
     let d=o.tyaw-o.g.rotation.y; while(d>Math.PI)d-=6.283; while(d<-Math.PI)d+=6.283;
     o.g.rotation.y+=d*Math.min(1,dt*9);
@@ -942,12 +997,12 @@ function sendAll(o){
 function onNet(m,peer){
   if(m.t==="u"){
     const o=ghostFor(m.id,m.n); o.tx=m.x;o.ty=m.y;o.tz=m.z;o.tyaw=m.a;o.score=m.s;
-    o.grab=!!m.gr; o.airborne=!!m.ar;
+    o.grab=!!m.gr; o.kind=m.gk|0; o.tuck=!!m.tk; o.airborne=!!m.ar;
     if(m.st&&o.g.userData.dir!==m.st) applyStance(o.g,m.st);
     if(NET.mode==="host"){
       NET.peers.forEach(p=>{ if(p!==peer&&p.dc&&p.dc.readyState==="open"){ try{p.dc.send(JSON.stringify(m));}catch(e){} } });
     }
-  }else if(m.t==="go"){ SEED=m.seed; startRun(false); }
+  }else if(m.t==="go"){ SEED=m.seed; if(m.md){ MODE=m.md; paintMode(); } startRun(false); }
   else if(m.t==="win"){ if(!NET.winner){ NET.winner={name:m.n,score:m.s};
     if(NET.mode==="host") sendAll(m); endRun(); } }
 }
@@ -955,7 +1010,7 @@ function netTick(){
   if(NET.mode==="solo"||!NET.started) return;
   sendAll({t:"u",id:NET.myId,n:NET.name,x:+P.pos.x.toFixed(2),y:+P.pos.y.toFixed(2),
            z:+P.pos.z.toFixed(2),a:+(P.yaw+P.spinAcc*Math.PI/180).toFixed(2),s:P.score,st:STANCE,
-           gr:(IN.grab&&P.air)?1:0,ar:P.air?1:0});
+           gr:(P.air&&P.grabbing)?1:0,gk:P.grabKind,tk:P.tucking?1:0,ar:P.air?1:0});
 }
 function refreshLobby(){
   const n=NET.peers.filter(p=>p.open).length;
@@ -1044,6 +1099,22 @@ async function joinRoom(){
   },1600);
 }
 
+/* ---------- mode ---------- */
+let MODE="endless";
+function paintMode(){
+  document.querySelectorAll(".mode-b").forEach(b=>b.classList.toggle("sel",b.dataset.md===MODE));
+  $("goal").classList.toggle("timer",MODE==="time");
+}
+function loadMode(){
+  try{ const v=localStorage.getItem("pl_mode"); if(v==="endless"||v==="time") MODE=v; }catch(e){}
+  paintMode();
+}
+function setMode(m){ MODE=m; try{ localStorage.setItem("pl_mode",m); }catch(e){} paintMode(); }
+function clockText(sec){
+  const s2=Math.max(0,Math.ceil(sec));
+  return Math.floor(s2/60)+":"+String(s2%60).padStart(2,"0");
+}
+
 /* ---------- stance preference ---------- */
 let STANCE=REGULAR;
 function loadStance(){
@@ -1062,14 +1133,16 @@ function setStance(dir){
 }
 
 /* ---------- game state ---------- */
-let state="menu", last=0, firstFrame=true, sendAcc=0;
+let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0;
 function startRun(broadcast){
-  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED});
-  NET.winner=null; NET.started=true;
+  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE});
+  NET.winner=null; NET.started=true; lastPip=0;
   ghosts.forEach(o=>o.score=0);
   resetPlayer();
   document.querySelectorAll(".panel").forEach(p=>p.classList.add("hide"));
   $("hud").classList.remove("hide"); $("zones").classList.remove("hide");
+  if(MODE!=="time") elGoal.textContent="/ 10,000 TO WIN";
+  paintMode();
   state="countdown"; countdown=3.2; firstFrame=true; initAudio();
 }
 let countdown=0;
@@ -1079,18 +1152,27 @@ function endRun(){
   const rows=[{n:NET.name,s:P.score,me:true}];
   ghosts.forEach(o=>rows.push({n:o.name,s:o.score,me:false}));
   rows.sort((a,b)=>b.s-a.s);
+  if(MODE==="time"&&!NET.winner&&rows.length) NET.winner={name:rows[0].me?NET.name:rows[0].n,score:rows[0].s};
   const win=NET.winner;
-  $("overTitle").textContent = win ? (win.name===NET.name?"YOU TOOK IT":win.name+" TOOK IT") : "RUN OVER";
+  $("overTitle").textContent = win ? (win.name===NET.name?"YOU TOOK IT":win.name+" TOOK IT")
+                                   : (MODE==="time"?"TIME":"RUN OVER");
   $("results").innerHTML=rows.map((r,i)=>
     `<div class="${i===0?'win':''}">${i+1}. ${r.me?"YOU":r.n} — ${r.s.toLocaleString()}</div>`).join("")
-    +`<div style="opacity:.6;font-size:12px;margin-top:8px">BEST AIR ${P.maxAir.toFixed(1)}s</div>`;
+    +`<div style="opacity:.6;font-size:12px;margin-top:8px">${MODE==="time"?"2 MINUTE ATTACK · ":""}BEST AIR ${P.maxAir.toFixed(1)}s</div>`;
   $("over").classList.remove("hide");
 }
 
 function updateHUD(dt){
   elScore.textContent=P.score.toLocaleString();
   elSpd.textContent=Math.round(P.speed*3.6);
-  elBar.style.width=Math.min(100,P.score/GOAL*100)+"%";
+  if(MODE==="time"){
+    const left=Math.max(0,RUN_SECONDS-P.clock);
+    elGoal.textContent=clockText(left);
+    elGoal.classList.toggle("low",left<=15);
+    elBar.style.width=(left/RUN_SECONDS*100)+"%";
+  }else{
+    elBar.style.width=Math.min(100,P.score/GOAL*100)+"%";
+  }
   if(P.air&&P.airT>0.4){ elAir.textContent=P.airT.toFixed(1)+"s"; elAir.classList.add("on"); }
   else elAir.classList.remove("on");
   if(trickT>0){ trickT-=dt; if(trickT<=0) elTrick.classList.remove("on"); }
@@ -1105,7 +1187,8 @@ function updateHUD(dt){
 
 function frame(t){
   requestAnimationFrame(frame);
-  const dt=Math.min(0.05,(t-last)/1000||0.016)*TIME; last=t;
+  const rdt=Math.min(0.05,(t-last)/1000||0.016); last=t;
+  const dt=rdt*TIME;
   stepBackdrop();
   if(state==="countdown"){
     countdown-=dt;
@@ -1121,12 +1204,20 @@ function frame(t){
     stepCamera(dt,firstFrame); firstFrame=false;
     stepSpray(dt); stepGhosts(dt); updateHUD(dt);
     sendAcc+=dt; if(sendAcc>0.08){ sendAcc=0; netTick(); }
-    let leader=P.score, lname=NET.name;
-    ghosts.forEach(o=>{ if(o.score>leader){leader=o.score;lname=o.name;} });
-    if(leader>=GOAL&&!NET.winner){
-      NET.winner={name:lname,score:leader};
-      if(NET.mode!=="solo") sendAll({t:"win",n:lname,s:leader});
-      endRun();
+    P.clock+=rdt;                                   // wall clock, unaffected by slow motion
+    if(MODE==="time"){
+      const left=RUN_SECONDS-P.clock;
+      if(left<=5.6&&left>0&&Math.ceil(left)!==lastPip){ lastPip=Math.ceil(left);
+        showBig(String(lastPip),"#a8321a"); bigT=0.8; blip(520,0.10,"triangle",0.10); }
+      if(left<=0){ endRun(); }
+    }else{
+      let leader=P.score, lname=NET.name;
+      ghosts.forEach(o=>{ if(o.score>leader){leader=o.score;lname=o.name;} });
+      if(leader>=GOAL&&!NET.winner){
+        NET.winner={name:lname,score:leader};
+        if(NET.mode!=="solo") sendAll({t:"win",n:lname,s:leader});
+        endRun();
+      }
     }
   }else{
     stepSpray(dt); stepGhosts(dt);
@@ -1156,9 +1247,10 @@ if("serviceWorker" in navigator) addEventListener("load",()=>navigator.serviceWo
 
 document.querySelectorAll(".seg-b").forEach(b=>
   b.onclick=()=>setStance(parseInt(b.dataset.st,10)));
+document.querySelectorAll(".mode-b").forEach(b=>b.onclick=()=>setMode(b.dataset.md));
 
 /* ---------- boot ---------- */
-loadStance(); joyHome(); resetPlayer(); stepCamera(0.016,true);
+loadStance(); loadMode(); joyHome(); resetPlayer(); stepCamera(0.016,true);
 requestAnimationFrame(frame);
 </script>
 </body>

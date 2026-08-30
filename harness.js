@@ -86,6 +86,7 @@ const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},hei
   "wipeout,trickName,get SEED(){return SEED},setSeed(v){SEED=v},get state(){return state},"+
   "CS,SLOPE,roomCode,buildRider,rider,MAT,ranges:[rangeFar,rangeMid,rangeNear],stepBackdrop,"+
   "applyStance,REGULAR,GOOFY,setStance,loadStance,get STANCE(){return STANCE},JOY,axis,readTouch,"+
-  "JOY_R,DEAD_C,DEAD_T,joyHome,TIME,poseRider,WAIST,ARM_REST};";
+  "JOY_R,DEAD_C,DEAD_T,GRAB_PUSH,joyHome,TIME,poseRider,WAIST,ARM_REST,GRABS,"+
+  "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD};";
 vm.runInContext(code+exportLine,sandbox,{filename:"game.js"});
 module.exports=sandbox;
