@@ -40,6 +40,11 @@
   #board{margin-top:10px;font-size:12px;font-weight:700;line-height:1.6;text-align:right;
     color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.8)}
   #board .me{color:#0d5a78;font-weight:900}
+  #park{position:absolute;left:0;right:0;top:6%;text-align:center;font-size:12px;font-weight:900;
+    letter-spacing:.18em;color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.85);
+    opacity:0;transition:opacity .3s}
+  #park.on{opacity:.95}
+  #park b{color:#c2410c}
   #centre{position:absolute;left:0;right:0;top:26%;text-align:center}
   #trick{font-size:clamp(22px,7vw,40px);font-weight:900;letter-spacing:.04em;color:#0b1f2f;
     text-shadow:0 1px 0 rgba(255,255,255,.9),0 0 16px rgba(255,255,255,.9);
@@ -105,6 +110,22 @@
   .lbl{font-size:10px;letter-spacing:.2em;font-weight:800;opacity:.6}
   #results{font-size:15px;line-height:1.9;font-weight:700}
   #results .win{color:#ffd97f}
+  #reel{position:fixed;inset:0;z-index:15;touch-action:none;
+    padding:max(20px,env(safe-area-inset-top)) 20px max(20px,env(safe-area-inset-bottom))}
+  #reelTop{position:absolute;top:max(20px,env(safe-area-inset-top));left:0;right:0;text-align:center;
+    font-size:11px;font-weight:900;letter-spacing:.26em;color:#0b1f2f;
+    text-shadow:0 1px 0 rgba(255,255,255,.85)}
+  #reelLabel{position:absolute;left:0;right:0;top:15%;text-align:center;
+    font-size:clamp(20px,6.5vw,34px);font-weight:900;letter-spacing:.03em;color:#0b1f2f;
+    text-shadow:0 1px 0 rgba(255,255,255,.9),0 0 18px rgba(255,255,255,.9)}
+  #reelSlow{position:absolute;left:0;right:0;top:26%;text-align:center;font-size:12px;
+    font-weight:900;letter-spacing:.30em;color:#c2410c;opacity:0;transition:opacity .15s;
+    text-shadow:0 1px 0 rgba(255,255,255,.85)}
+  #reelSlow.on{opacity:1}
+  #reelFoot{position:absolute;left:0;right:0;bottom:max(20px,env(safe-area-inset-bottom));
+    text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
+  #reelHint{font-size:10px;font-weight:800;letter-spacing:.15em;opacity:.65;color:#0b1f2f;
+    text-shadow:0 1px 0 rgba(255,255,255,.75)}
   .seg-b.sel,.mode-b.sel{background:#7fe3ff;color:#08202f;box-shadow:0 4px 0 #3fa9cc}
   #goal.timer{font-size:30px;letter-spacing:.04em;font-weight:900;margin-top:2px}
   #goal.timer.low{color:#a8321a}
@@ -145,6 +166,7 @@
     <div id="board"></div>
   </div>
   <div id="air" class="mono">0.0s</div>
+  <div id="park"></div>
   <div id="centre"><div id="trick"></div><div id="combo"></div></div>
   <div id="big"></div>
 </div>
@@ -195,6 +217,16 @@
            spellcheck="false" placeholder="ABCD">
     <button id="bJoinGo" class="sm">JOIN</button>
     <div class="sub" id="joinStatus"></div>
+  </div>
+</div>
+
+<div id="reel" class="hide">
+  <div id="reelTop"><span id="reelN"></span></div>
+  <div id="reelLabel"></div>
+  <div id="reelSlow">SLOW MOTION</div>
+  <div id="reelFoot">
+    <div id="reelHint">HOLD ANYWHERE TO SLOW IT DOWN · TAP TO SKIP AHEAD</div>
+    <button id="bSkipReel" class="sm ghost">RESULTS</button>
   </div>
 </div>
 
@@ -253,7 +285,16 @@ function vnoise(x,y,s){
 
 /* ---------- terrain feature bands ---------- */
 const FEAT=["open","cliff","glade","park","boulder","cliff","open","glade","park","cliff","boulder","open"];
-function featOf(b){ if(b<1) return "open"; return FEAT[Math.floor(hash2(b,7,SEED)*FEAT.length)%FEAT.length]; }
+function featOf(b){
+  if(b<1) return "open";
+  if(b===3) return "park";          // every mountain has a park within the first 400m
+  return FEAT[Math.floor(hash2(b,7,SEED)*FEAT.length)%FEAT.length];
+}
+function nextParkBand(z){
+  const b=Math.max(0,Math.floor(z/CS));
+  for(let i=0;i<14;i++) if(featOf(b+i)==="park") return b+i;
+  return -1;
+}
 function dropOf(b){
   if(featOf(b)!=="cliff") return 0;
   return 9+hash2(b,23,SEED)*13;               // 9–22 m cornice
@@ -347,6 +388,8 @@ const MAT={
   pine:new THREE.MeshToonMaterial({color:0x1f4a3a,gradientMap:G3,flatShading:true}),
   bark:new THREE.MeshToonMaterial({color:0x3a2a22,gradientMap:G3}),
   rock:new THREE.MeshToonMaterial({color:0x59636e,gradientMap:G3,flatShading:true}),
+  pole:new THREE.MeshToonMaterial({color:0x27303c,gradientMap:G3}),
+  flag:new THREE.MeshToonMaterial({color:0xff6b4a,gradientMap:G3}),
   ink:new THREE.MeshBasicMaterial({color:0x0e2130,side:THREE.BackSide}),
   body:new THREE.MeshToonMaterial({color:0xff6b4a,gradientMap:G3}),
   skin:new THREE.MeshToonMaterial({color:0x2b3a47,gradientMap:G3}),
@@ -412,9 +455,11 @@ const pineGeo=new THREE.ConeGeometry(2.5,9,7,1);
 pineGeo.translate(0,4.5,0);
 const barkGeo=new THREE.CylinderGeometry(0.42,0.55,3,5); barkGeo.translate(0,1.5,0);
 const rockGeo=new THREE.IcosahedronGeometry(1,0);
+const poleGeo=new THREE.CylinderGeometry(0.13,0.16,1,6); poleGeo.translate(0,0.5,0);
+const flagGeo=new THREE.BoxGeometry(1,1,0.10);
 const logGeo=new THREE.CylinderGeometry(1,1,1,8);
 logGeo.rotateX(Math.PI/2);          // axis now runs along +Z, so scale.z is the length
-const MAXT=54, MAXR=26, MAXL=8;
+const MAXT=54, MAXR=26, MAXL=8, MAXP=10, MAXB=6;
 const LOG_R=0.38;
 
 class Chunk{
@@ -429,7 +474,10 @@ class Chunk{
     this.rOut=new THREE.InstancedMesh(rockGeo,MAT.ink,MAXR);
     this.logs=new THREE.InstancedMesh(logGeo,MAT.bark,MAXL);
     this.lOut=new THREE.InstancedMesh(logGeo,MAT.ink,MAXL);
-    this.all=[this.mesh,this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut];
+    this.poles=new THREE.InstancedMesh(poleGeo,MAT.pole,MAXP);
+    this.flags=new THREE.InstancedMesh(flagGeo,MAT.flag,MAXB);
+    this.all=[this.mesh,this.trees,this.tOut,this.barks,this.rocks,this.rOut,
+              this.logs,this.lOut,this.poles,this.flags];
     this.all.forEach(m=>{m.frustumCulled=false;m.visible=false;scene.add(m);});
     this.obs=[]; this.band=-1;
   }
@@ -455,6 +503,30 @@ class Chunk{
     d.rotation.order="YXZ";
 
     /* --- fallen trees: grindable rails lying down the fall line --- */
+    /* --- park signage: a gate you can see coming, and flags on every lip --- */
+    let pi=0, bi=0;
+    const pole=(x,z,h)=>{ if(pi>=MAXP) return;
+      d.position.set(x,heightAt(x,z),z); d.rotation.set(0,0,0); d.scale.set(1,h,1);
+      d.updateMatrix(); this.poles.setMatrixAt(pi++,d.matrix); };
+    const flag=(x,y,z,w,h,yaw)=>{ if(bi>=MAXB) return;
+      d.position.set(x,y,z); d.rotation.set(0,yaw||0,0); d.scale.set(w,h,1);
+      d.updateMatrix(); this.flags.setMatrixAt(bi++,d.matrix); };
+    if(f==="park"){
+      const ks=parkKickers(b);
+      const gz=z0+ks[0].kz-19, gx=ks[0].xc;
+      pole(gx-11,gz,5.4); pole(gx+11,gz,5.4);
+      flag(gx,heightAt(gx,gz)+4.7,gz,22,1.2,0);
+      for(const k of ks){                       // a flag either side of each takeoff
+        const kz=z0+k.kz;
+        pole(k.xc-11.5,kz,2.6); pole(k.xc+11.5,kz,2.6);
+        flag(k.xc-11.5,heightAt(k.xc-11.5,kz)+2.3,kz,1.7,0.85,0);
+      }
+    }
+    for(let i=pi;i<MAXP;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
+      d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.poles.setMatrixAt(i,d.matrix); }
+    for(let i=bi;i<MAXB;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
+      d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.flags.setMatrixAt(i,d.matrix); }
+
     const nL = f==="park"?MAXL : (f==="glade"||f==="open")?3 : 1;
     let li=0;
     for(let i=0;i<MAXL;i++){
@@ -542,8 +614,8 @@ class Chunk{
       d.position.set(0,-9999,0); d.scale.set(0.001,0.001,0.001); d.updateMatrix();
       this.rocks.setMatrixAt(i,d.matrix); this.rOut.setMatrixAt(i,d.matrix);
     }
-    [this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut]
-      .forEach(m=>m.instanceMatrix.needsUpdate=true);
+    [this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut,
+     this.poles,this.flags].forEach(m=>m.instanceMatrix.needsUpdate=true);
     this.all.forEach(m=>m.visible=true);
   }
 }
@@ -859,6 +931,7 @@ function resetPlayer(){
 
 /* ---------- HUD ---------- */
 const $=id=>document.getElementById(id);
+const elPark=$("park");
 const elScore=$("score"),elSpd=$("spd"),elTrick=$("trick"),elCombo=$("combo"),
       elAir=$("air"),elBig=$("big"),elBar=$("barFill"),elBoard=$("board"),elGoal=$("goal");
 let bigT=0,trickT=0;
@@ -891,7 +964,9 @@ function land(clean){
   const pts=Math.round(base*mult);
   P.score+=pts;
   P.comboT=4.5;
-  showTrick(trickName(halfSpins,flips,P.grabT>0.35?gk.n:null,sw)+"  +"+pts);
+  const nm=trickName(halfSpins,flips,P.grabT>0.35?gk.n:null,sw);
+  recCredit(pts,nm);
+  showTrick(nm+"  +"+pts);
   if(P.combo>1){ elCombo.textContent="COMBO ×"+mult.toFixed(1); elCombo.classList.add("on"); }
   blip(430+halfSpins*70,0.16,"triangle",0.11);
   if(airT>2.4) showBig("STOMPED","#0d5a78");
@@ -943,6 +1018,7 @@ function endGrind(){
   const mult=Math.min(1+0.22*(P.combo-1),2.6);
   const pts=Math.round((Math.floor(t*105)+(t>1.6?90:0))*mult);
   P.score+=pts; P.comboT=4.5;
+  recCredit(pts,"RAIL "+t.toFixed(1)+"s");
   showTrick("RAIL "+t.toFixed(1)+"s  +"+pts);
   if(P.combo>1){ elCombo.textContent="COMBO ×"+mult.toFixed(1); elCombo.classList.add("on"); }
   blip(620,0.14,"triangle",0.10);
@@ -1319,11 +1395,52 @@ function setStance(dir){
     b.classList.toggle("sel", parseInt(b.dataset.st,10)===STANCE));
 }
 
+/* ---------- highlight capture ----------
+   Rather than recording the whole run, we keep a short rolling pre-roll and only
+   commit a clip when something actually happens, then keep the best three. */
+const PRE_FRAMES=42, MAX_CLIP=320, KEEP_CLIPS=3;
+const REC={pre:[],active:null,clips:[],quiet:0};
+function recReset(){ REC.pre.length=0; REC.active=null; REC.clips.length=0; REC.quiet=0; }
+function recSnapshot(){
+  return {x:P.pos.x,y:P.pos.y,z:P.pos.z,yaw:P.yaw,spin:P.spinAcc,flip:P.flipAcc,roll:P.roll,
+          grab:!!(P.air&&P.grabbing),kind:P.grabKind,tuck:!!(!P.air&&P.tucking),
+          air:P.air,grind:P.grinding,spd:P.speed,gap:P.pos.y-heightAt(P.pos.x,P.pos.z)};
+}
+function recStep(dt){
+  const f=recSnapshot();
+  const busy=P.air||P.grinding;
+  if(REC.active){
+    REC.active.frames.push(f);
+    // the length cap has to apply even mid-air: an air-into-grind-into-air chain
+    // never goes quiet, and would otherwise record without limit
+    if(REC.active.frames.length>=MAX_CLIP) recClose();
+    else if(busy) REC.quiet=0;
+    else { REC.quiet+=dt; if(REC.quiet>0.55) recClose(); }
+  }else{
+    REC.pre.push(f);
+    if(REC.pre.length>PRE_FRAMES) REC.pre.shift();
+    if(busy){ REC.active={frames:REC.pre.slice(),points:0,label:"",top:0}; REC.pre.length=0; REC.quiet=0; }
+  }
+}
+function recCredit(pts,label){
+  if(!REC.active) return;
+  REC.active.points+=pts;
+  if(pts>=REC.active.top){ REC.active.top=pts; REC.active.label=label; }
+}
+function recClose(){
+  const c=REC.active; REC.active=null; REC.quiet=0;
+  if(!c||c.points<=0||c.frames.length<20) return;
+  REC.clips.push(c);
+  REC.clips.sort((a,b)=>b.points-a.points);
+  if(REC.clips.length>KEEP_CLIPS) REC.clips.length=KEEP_CLIPS;
+}
+
 /* ---------- game state ---------- */
 let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0, hintsT=0;
 function startRun(broadcast){
   if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE});
-  NET.winner=null; NET.started=true; lastPip=0;
+  NET.winner=null; NET.started=true; lastPip=0; recReset();
+  $("reel").classList.add("hide");
   ghosts.forEach(o=>o.score=0);
   resetPlayer();
   document.querySelectorAll(".panel").forEach(p=>p.classList.add("hide"));
@@ -1334,12 +1451,72 @@ function startRun(broadcast){
   state="countdown"; countdown=3.2; firstFrame=true; initAudio();
 }
 let countdown=0;
+const REEL={i:0,f:0,hold:false,down:0,moved:0,orbit:0};
 function endRun(){
-  state="over"; NET.started=false;
+  NET.started=false;
   $("hud").classList.add("hide"); $("zones").classList.add("hide"); $("hints").classList.add("hide");
+  elPark.classList.remove("on");
+  recClose();
+  if(REC.clips.length){ startReel(); return; }
+  showResults();
+}
+function startReel(){
+  state="reel";
+  REEL.i=0; REEL.f=0; REEL.hold=false; REEL.orbit=0;
+  ghosts.forEach(o=>o.g.visible=false);
+  $("reel").classList.remove("hide");
+  reelCaption();
+}
+function reelCaption(){
+  const c=REC.clips[REEL.i];
+  $("reelN").textContent="HIGHLIGHT "+(REEL.i+1)+" OF "+REC.clips.length;
+  $("reelLabel").textContent=c? c.label+"  +"+c.points : "";
+}
+function stepReel(rdt){
+  const c=REC.clips[REEL.i];
+  if(!c){ endReel(); return; }
+  $("reelSlow").classList.toggle("on",REEL.hold);
+  REEL.f += REEL.hold?0.18:1;                 // hold slows playback to a crawl
+  if(REEL.f>=c.frames.length-1){
+    REEL.i++; REEL.f=0;
+    if(REEL.i>=REC.clips.length){ endReel(); return; }
+    reelCaption();
+  }
+  const cur=REC.clips[REEL.i], f=cur.frames[Math.min(cur.frames.length-1,Math.floor(REEL.f))];
+  syncChunks(f.z);
+  rider.visible=true;
+  rider.position.set(f.x,f.y-(f.air?0:0.30),f.z);
+  rider.rotation.order="YXZ";
+  rider.rotation.y=f.yaw+f.spin*Math.PI/180;
+  rider.rotation.x=f.flip*Math.PI/180;
+  rider.rotation.z=f.roll;
+  poseRider(rider,rdt*(REEL.hold?0.35:1),
+            {grab:f.grab,kind:f.kind,tuck:f.tuck,air:f.air,carve:0,gap:f.gap});
+  // slow orbit so the trick reads from a different angle than you rode it
+  REEL.orbit += rdt*(REEL.hold?0.22:0.55);
+  const ang=f.yaw+Math.PI+Math.sin(REEL.orbit)*0.9;
+  const rad=8.5, hgt=2.6+Math.min(5,Math.max(0,f.gap)*0.35);
+  const want=new THREE.Vector3(f.x+Math.sin(ang)*rad,f.y+hgt,f.z+Math.cos(ang)*rad);
+  const gh=heightAt(want.x,want.z)+1.4;
+  if(want.y<gh) want.y=gh;
+  camPos.lerp(want,Math.min(1,rdt*6));
+  camera.position.copy(camPos);
+  camAim.lerp(new THREE.Vector3(f.x,f.y+1.1,f.z),Math.min(1,rdt*7));
+  camera.lookAt(camAim);
+  stepSpray(rdt*(REEL.hold?0.35:1));
+}
+function endReel(){
+  $("reel").classList.add("hide");
+  $("reelSlow").classList.remove("on");
+  ghosts.forEach(o=>o.g.visible=true);
+  showResults();
+}
+function showResults(){
+  state="over";
   const rows=[{n:NET.name,s:P.score,me:true}];
   ghosts.forEach(o=>rows.push({n:o.name,s:o.score,me:false}));
   rows.sort((a,b)=>b.s-a.s);
+  $("hud").classList.add("hide"); $("zones").classList.add("hide");
   if(MODE==="time"&&!NET.winner&&rows.length) NET.winner={name:rows[0].me?NET.name:rows[0].n,score:rows[0].s};
   const win=NET.winner;
   $("overTitle").textContent = win ? (win.name===NET.name?"YOU TOOK IT":win.name+" TOOK IT")
@@ -1361,6 +1538,11 @@ function updateHUD(dt){
   }else{
     elBar.style.width=Math.min(100,P.score/GOAL*100)+"%";
   }
+  const pb=nextParkBand(P.pos.z);
+  const pd=pb<0?1e9:(pb*CS+18)-P.pos.z;
+  if(pd>10&&pd<420){ elPark.innerHTML="<b>PARK</b> "+Math.round(pd)+"m"; elPark.classList.add("on"); }
+  else if(pd<=10&&pd>-100){ elPark.innerHTML="<b>PARK</b>"; elPark.classList.add("on"); }
+  else elPark.classList.remove("on");
   if(P.air&&P.airT>0.4){ elAir.textContent=P.airT.toFixed(1)+"s"; elAir.classList.add("on"); }
   else elAir.classList.remove("on");
   if(trickT>0){ trickT-=dt; if(trickT<=0) elTrick.classList.remove("on"); }
@@ -1390,7 +1572,7 @@ function frame(t){
     stepPlayer(dt);
     syncChunks(P.pos.z);
     stepCamera(dt,firstFrame); firstFrame=false;
-    stepSpray(dt); stepGhosts(dt); updateHUD(dt);
+    stepSpray(dt); stepGhosts(dt); updateHUD(dt); recStep(dt);
     sendAcc+=dt; if(sendAcc>0.08){ sendAcc=0; netTick(); }
     if(hintsT>0){ hintsT-=rdt;                      // guidance clears itself out of the way
       if(hintsT<=0||P.air) { hintsT=0; $("hints").classList.add("gone"); } }
@@ -1409,11 +1591,31 @@ function frame(t){
         endRun();
       }
     }
+  }else if(state==="reel"){
+    stepReel(rdt);
   }else{
     stepSpray(dt); stepGhosts(dt);
   }
   renderer.render(scene,camera);
 }
+
+const reelEl=$("reel");
+reelEl.addEventListener("pointerdown",e=>{
+  if(e.target.id==="bSkipReel") return;
+  reelEl.setPointerCapture(e.pointerId);
+  REEL.down=performance.now(); REEL.moved=0; REEL.hold=true;
+});
+reelEl.addEventListener("pointerup",e=>{
+  if(e.target.id==="bSkipReel") return;
+  const quick=performance.now()-REEL.down<220;
+  REEL.hold=false;
+  if(quick){                                   // a tap jumps to the next highlight
+    REEL.i++; REEL.f=0;
+    if(REEL.i>=REC.clips.length) endReel(); else reelCaption();
+  }
+});
+reelEl.addEventListener("pointercancel",()=>{ REEL.hold=false; });
+$("bSkipReel").onclick=()=>{ REEL.hold=false; endReel(); };
 
 /* ---------- menu wiring ---------- */
 $("bSolo").onclick=()=>{ NET.mode="solo"; SEED=Math.floor(Math.random()*1e6); startRun(false); };

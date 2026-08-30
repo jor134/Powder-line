@@ -88,6 +88,7 @@ const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},hei
   "applyStance,REGULAR,GOOFY,setStance,loadStance,get STANCE(){return STANCE},JOY,axis,readTouch,"+
   "JOY_R,DEAD_C,DEAD_T,GRAB_PUSH,joyHome,TIME,poseRider,WAIST,ARM_REST,GRABS,"+
   "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD,"+
-  "findRail,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding};";
+  "findRail,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding,"+
+  "nextParkBand,MAXP,MAXB,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP};";
 vm.runInContext(code+exportLine,sandbox,{filename:"game.js"});
 module.exports=sandbox;

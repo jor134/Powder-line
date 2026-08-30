@@ -623,6 +623,69 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(above===0,"and below board height rather than up into the camera ("+above+" bad)");
 }
 
+/* 25 — parks must be findable: signposted, and one early in every run */
+{
+  for(const sd of [1337,42,90210,7,555001,314159]){
+    G.setSeed(sd); G.cumDrop(60);
+    let first=-1;
+    for(let b=1;b<60&&first<0;b++) if(G.featOf(b)==="park") first=b;
+    ok(first>0&&first<=3,"seed "+sd+": a park appears within 300m (band "+first+")");
+  }
+  G.setSeed(1337); G.resetPlayer();
+  ok(G.nextParkBand(0)===3,"the park finder points at the first park from the gate");
+  ok(G.nextParkBand(320)===3,"while you are inside the park it still reads as the park");
+  ok(G.nextParkBand(420)>3,"and moves on to the next one once you are past");
+
+  // signage instances actually get written for park bands and cleared elsewhere
+  G.syncChunks(350);
+  const park=G.chunks.find(c=>c.band===3);
+  ok(!!park&&G.featOf(3)==="park","band 3 is the park");
+  ok(!!park.poles&&!!park.flags,"the park chunk carries gate and flag instances");
+  ok(park.poles.count===G.MAXP&&park.flags.count===G.MAXB,"signage pools are fixed size");
+}
+
+/* 26 — highlight capture: only eventful moments, best three kept */
+{
+  G.setSeed(1337); G.resetPlayer(); G.recReset();
+  const P=G.P, IN=G.IN;
+  for(let i=0;i<60*200;i++){
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
+    if(!P.air&&!P.grinding&&P.crash<=0&&i%110===0) IN.jump=true;
+    if(P.air&&P.airT>0.15){ const g=P.pos.y-G.heightAt(P.pos.x,P.pos.z);
+      if(g>6){ IN.spin=1; IN.grabL=true; IN.grabDir=Math.PI/2; } }
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); G.recStep(G.TIME/60);
+  }
+  G.recClose();
+  const clips=G.REC.clips;
+  ok(clips.length>0&&clips.length<=3,"the reel keeps at most three clips ("+clips.length+")");
+  ok(clips.every(c=>c.points>0),"every kept clip actually scored");
+  ok(clips.every((c,i)=>i===0||clips[i-1].points>=c.points),"clips are ordered best first");
+  ok(clips.every(c=>c.frames.length>=20&&c.frames.length<=G.MAX_CLIP),
+     "clip lengths are bounded ("+clips.map(c=>c.frames.length).join("/")+" frames)");
+  ok(clips.every(c=>c.label&&c.label.length),"each clip is captioned with its trick");
+  // the pre-roll means a clip starts BEFORE the takeoff, not at it
+  ok(clips.some(c=>c.frames.slice(0,8).every(f=>!f.air&&!f.grind)),
+     "clips open with ground before the takeoff, not mid-air");
+  ok(G.REC.pre.length<=G.PRE_FRAMES,"the rolling pre-roll buffer stays bounded");
+  const f=clips[0].frames[0];
+  ok(["x","y","z","yaw","spin","flip","roll","grab","kind","tuck","air","grind"]
+     .every(k=>k in f),"frames carry everything needed to replay the pose");
+}
+
+/* 27 — memory: capture must not grow without bound over a long run */
+{
+  G.setSeed(42); G.resetPlayer(); G.recReset();
+  const P=G.P, IN=G.IN;
+  for(let i=0;i<60*400;i++){
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
+    if(!P.air&&!P.grinding&&P.crash<=0&&i%90===0) IN.jump=true;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); G.recStep(G.TIME/60);
+  }
+  const total=G.REC.clips.reduce((n,c)=>n+c.frames.length,0)+G.REC.pre.length;
+  ok(total<=3*G.MAX_CLIP+G.PRE_FRAMES,
+     "a 6-minute run holds at most "+total+" recorded frames, not the whole run");
+}
+
 /* 19 — a stick with no thumb on it never writes input */
 {
   const IN=G.IN;
