@@ -741,6 +741,68 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   G.setParkStart(false);
 }
 
+/* 30 — the drop-off: the helicopter must actually fly a path, hand the rider over,
+   and leave the rider exactly on the spawn point when the run begins. */
+{
+  G.setSeed(1337); G.resetPlayer();
+  const S={x:G.P.pos.x,y:G.P.pos.y,z:G.P.pos.z};
+  G.introReset();
+  ok(G.heli.visible===true,"the helicopter appears for the drop-off");
+
+  const path=[], riderPath=[];
+  const dt=1/60;
+  for(let cd=G.INTRO_DUR; cd>0; cd-=dt){
+    G.stepIntro(Math.max(0,cd),dt);
+    path.push({cd,x:G.heli.position.x,y:G.heli.position.y,z:G.heli.position.z,
+               ry:G.heli.rotation.y,rz:G.heli.rotation.z});
+    riderPath.push({cd,y:G.rider.position.y,x:G.rider.position.x,z:G.rider.position.z});
+  }
+
+  const first=path[0], last=path[path.length-1];
+  ok(first.y>S.y+40,"it comes in high above the summit ("+(first.y-S.y).toFixed(0)+"m up)");
+  ok(first.z<S.z-100,"and from up the valley ("+(first.z-S.z).toFixed(0)+"m behind the spawn)");
+
+  const hoverFrames=path.filter(p=>p.cd<=G.T_HOVER&&p.cd>1.05);
+  const hoverSpread=Math.max(...hoverFrames.map(p=>Math.hypot(p.x-S.x,p.z-S.z)));
+  ok(hoverSpread<0.5,"it holds a steady hover over the spawn ("+hoverSpread.toFixed(2)+"m of drift)");
+  const hoverH=hoverFrames[0].y-S.y;
+  ok(Math.abs(hoverH-G.HOVER_H)<1.0,"hovering at "+hoverH.toFixed(1)+"m");
+
+  ok(Math.hypot(last.x-S.x,last.z-S.z)>60,"it leaves the scene by the end ("+
+     Math.hypot(last.x-S.x,last.z-S.z).toFixed(0)+"m away)");
+  ok(Math.max(...path.map(p=>Math.abs(p.rz)))>0.2,"it banks rather than sliding flat");
+
+  // rider handover
+  const hanging=riderPath.filter(r=>r.cd>G.T_RELEASE);
+  ok(hanging.every(r=>r.y>S.y+3),"the rider hangs clear of the ground before release");
+  const falling=riderPath.filter(r=>r.cd<=G.T_RELEASE);
+  let monotonic=true;
+  for(let i=1;i<falling.length;i++) if(falling[i].y>falling[i-1].y+0.01) monotonic=false;
+  ok(monotonic,"the drop is a clean fall with no bounce back up");
+  const end=riderPath[riderPath.length-1];
+  ok(Math.abs(end.x-S.x)<0.01&&Math.abs(end.z-S.z)<0.01,
+     "the rider finishes exactly on the spawn point, not beside it");
+  ok(Math.abs(end.y-(S.y-0.30))<0.01,"and settled into the snow at riding height");
+  ok(G.INTRO.landed===true,"the landing puff fires once the rider touches down");
+
+  // the fall must complete before the clock runs out, or the run starts mid-air
+  const touchdown=falling.find(r=>Math.abs(r.y-(S.y-0.30))<0.01);
+  ok(!!touchdown&&touchdown.cd>0.25,
+     "touchdown happens with "+(touchdown?touchdown.cd.toFixed(2):"0")+"s still on the clock");
+}
+
+/* 31 — the rotors turn, and the drop-off can be skipped */
+{
+  G.setSeed(1337); G.resetPlayer(); G.introReset();
+  const before=G.heli.userData.rotor.rotation.y;
+  const tailBefore=G.heli.userData.tail.rotation.x;
+  for(let i=0;i<30;i++) G.stepIntro(4.0,1/60);
+  ok(G.heli.userData.rotor.rotation.y>before+8,"the main rotor spins up");
+  ok(G.heli.userData.tail.rotation.x>tailBefore+10,"so does the tail rotor");
+  ok(G.INTRO_DUR>3&&G.INTRO_DUR<7,"the whole sequence is "+G.INTRO_DUR+"s — short enough to sit through");
+  ok(G.T_RELEASE<G.T_HOVER,"the rider is released after the hover is established");
+}
+
 /* 19 — a stick with no thumb on it never writes input */
 {
   const IN=G.IN;

@@ -71,6 +71,9 @@
     color:#0b1f2f;text-shadow:0 1px 0 rgba(255,255,255,.8);opacity:.72;
     transition:opacity .7s;padding:0 16px}
   #hints.gone{opacity:0}
+  #introSkip{position:fixed;left:0;right:0;z-index:9;pointer-events:none;text-align:center;
+    bottom:calc(env(safe-area-inset-bottom) + 22px);font-size:10px;font-weight:800;
+    letter-spacing:.22em;color:#0b1f2f;opacity:.6;text-shadow:0 1px 0 rgba(255,255,255,.75)}
   .joy{position:fixed;width:112px;height:112px;margin:-56px 0 0 -56px;pointer-events:none;z-index:9;
     opacity:.55;transition:opacity .14s;will-change:transform}
   .joy.live{opacity:1}
@@ -154,6 +157,8 @@
   <div>PUSH IT IN THE AIR TO GRAB</div>
   <div>RIGHT — TAP JUMP · PUSH SPIN · HOLD TO TUCK</div>
 </div>
+
+<div id="introSkip" class="hide">TAP TO SKIP</div>
 
 <div id="hud" class="hide">
   <div id="scoreWrap">
@@ -774,6 +779,49 @@ function buildRider(deckColor, coatColor, dir){
 }
 const rider=buildRider(0x7fe3ff,0xff6b4a,REGULAR); scene.add(rider);
 
+/* ---------- drop-off helicopter ---------- */
+function buildHeli(){
+  const g=new THREE.Group();
+  const bodyM=new THREE.MeshToonMaterial({color:0xe2542f,gradientMap:G3});
+  const darkM=new THREE.MeshToonMaterial({color:0x2b3440,gradientMap:G3});
+  const glassM=new THREE.MeshToonMaterial({color:0x16303f,gradientMap:G3});
+  const outline=[];
+  const mk=(geo,mat,parent,sc)=>{ const m=new THREE.Mesh(geo,mat); (parent||g).add(m);
+    if(sc) outline.push([m,sc]); return m; };
+
+  const fus=mk(new THREE.SphereGeometry(1,12,9),bodyM,g,[1.06,1.06,1.02]);
+  fus.scale.set(1.5,1.35,2.9);
+  const nose=mk(new THREE.SphereGeometry(1,12,8),glassM); nose.scale.set(1.3,1.12,1.3); nose.position.z=1.95;
+  const band=mk(new THREE.SphereGeometry(1,12,8),darkM); band.scale.set(1.52,0.30,1.55); band.position.set(0,0.55,0.2);
+  const boom=mk(new THREE.BoxGeometry(0.5,0.5,5.4),bodyM,g,[1.12,1.12,1.01]); boom.position.z=-4.0;
+  const fin=mk(new THREE.BoxGeometry(0.22,1.5,1.0),bodyM); fin.position.set(0,0.78,-6.4);
+  const stab=mk(new THREE.BoxGeometry(2.6,0.16,0.7),bodyM); stab.position.set(0,0.1,-5.9);
+  for(const sx of [-1.25,1.25]){
+    const sk=mk(new THREE.BoxGeometry(0.18,0.18,5.0),darkM); sk.position.set(sx,-1.9,0.2);
+    for(const sz of [-1.2,1.5]){
+      const st=mk(new THREE.BoxGeometry(0.14,1.15,0.14),darkM); st.position.set(sx*0.82,-1.35,sz);
+    }
+  }
+  const mast=mk(new THREE.CylinderGeometry(0.16,0.16,1.0,6),darkM); mast.position.y=1.4;
+  const rotor=new THREE.Group(); rotor.position.y=1.88; g.add(rotor);
+  mk(new THREE.CylinderGeometry(0.30,0.30,0.5,8),darkM,rotor);
+  for(let i=0;i<2;i++){                                  // two bars read as four blades
+    const bl=mk(new THREE.BoxGeometry(0.34,0.07,11.4),darkM,rotor);
+    bl.rotation.y=i*Math.PI/2;
+  }
+  const disc=new THREE.Mesh(new THREE.CircleGeometry(5.9,26),
+    new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.13,depthWrite:false}));
+  disc.rotation.x=-Math.PI/2; disc.position.y=1.92; g.add(disc);
+  const tail=new THREE.Group(); tail.position.set(0.34,0.62,-6.5); g.add(tail);
+  for(let i=0;i<3;i++){ const b2=mk(new THREE.BoxGeometry(0.10,2.3,0.20),darkM,tail);
+    b2.rotation.z=i*Math.PI/3; }
+  outline.forEach(([m,sc])=>{ const o=new THREE.Mesh(m.geometry,MAT.ink);
+    o.scale.set(sc[0],sc[1],sc[2]); m.add(o); });
+  g.userData={rotor,tail,disc};
+  return g;
+}
+const heli=buildHeli(); heli.visible=false; scene.add(heli);
+
 /* ---------- powder spray ---------- */
 const PN=420;
 const sprayGeo=new THREE.BufferGeometry();
@@ -811,7 +859,7 @@ function stepSpray(dt){
 }
 
 /* ---------- audio (procedural) ---------- */
-let AC=null,carveGain=null,windGain=null;
+let AC=null,carveGain=null,windGain=null,heliGain=null;
 function initAudio(){
   if(AC) return;
   try{
@@ -824,7 +872,7 @@ function initAudio(){
       const g=AC.createGain(); g.gain.value=0;
       src.connect(f); f.connect(g); g.connect(AC.destination); src.start(); return g;
     };
-    carveGain=mk(900,1.1); windGain=mk(300,0.6);
+    carveGain=mk(900,1.1); windGain=mk(300,0.6); heliGain=mk(120,0.8);
   }catch(e){}
 }
 function blip(freq,dur,type,vol){
@@ -896,6 +944,7 @@ function bindZone(el,which){
   el.addEventListener("pointerdown",e=>{
     el.setPointerCapture(e.pointerId);
     j.touch={id:e.pointerId,x0:e.clientX,y0:e.clientY,t0:performance.now(),moved:0};
+    if(state==="countdown"&&countdown>0.85) countdown=0.85;   // tap to skip the drop-off
     j.dx=0; j.dy=0;
     placeJoy(j,e.clientX,e.clientY); knobTo(j,0,0);
     j.el.classList.add("live");
@@ -1216,6 +1265,96 @@ function poseRider(g,dt,o){
   u.headG.rotation.x = lerp(u.headG.rotation.x, (air?-0.10:0.14)+0.42*a+0.30*t, Math.min(1,dt*6));
 }
 
+/* ---------- helicopter drop-off ----------
+   Timeline is expressed in seconds REMAINING on the countdown, so skipping is just
+   a matter of shortening the clock. */
+const INTRO_DUR=5.0, T_HOVER=2.35, T_RELEASE=1.80, HOVER_H=12.4, HANG_DROP=3.4;
+const INTRO={spawn:new THREE.Vector3(),landed:false};
+const _hp=new THREE.Vector3(), _hv=new THREE.Vector3();
+function introReset(){
+  INTRO.spawn.set(P.pos.x,P.pos.y,P.pos.z);
+  INTRO.landed=false;
+  heli.visible=true;
+  heli.rotation.set(0,0,0);
+}
+function stepIntro(cd,rdt){
+  const S=INTRO.spawn;
+  const hover=_hv.set(S.x,S.y+HOVER_H,S.z);
+  const startX=S.x-70, startY=S.y+66, startZ=S.z-165;
+  const awayX =S.x-105, awayY=S.y+58, awayZ=S.z+55;
+
+  let banking=0;
+  if(cd>T_HOVER){
+    const u=clamp((INTRO_DUR-cd)/(INTRO_DUR-T_HOVER),0,1);
+    const e=u*u*(3-2*u);
+    _hp.set(lerp(startX,hover.x,e),lerp(startY,hover.y,e),lerp(startZ,hover.z,e));
+    _hp.y+=Math.sin(u*Math.PI)*6;                      // a little arc on the way in
+    banking=(1-e)*0.30;
+  }else if(cd>1.05){
+    _hp.copy(hover);
+    _hp.y+=Math.sin((T_HOVER-cd)*3.4)*0.35;            // hover wobble
+  }else{
+    const d=clamp((1.05-cd)/1.05,0,1), e=d*d;
+    _hp.set(lerp(hover.x,awayX,e),lerp(hover.y,awayY,e),lerp(hover.z,awayZ,e));
+    banking=-0.45*Math.sin(d*Math.PI);
+  }
+  heli.position.copy(_hp);
+  const facing = cd>1.05 ? Math.atan2(hover.x-startX,hover.z-startZ)
+                         : Math.atan2(awayX-hover.x,awayZ-hover.z);
+  let dyaw=facing-heli.rotation.y;
+  while(dyaw>Math.PI)dyaw-=6.283; while(dyaw<-Math.PI)dyaw+=6.283;
+  heli.rotation.y+=dyaw*Math.min(1,rdt*3.2);
+  heli.rotation.z=lerp(heli.rotation.z,banking,Math.min(1,rdt*4));
+  heli.rotation.x=lerp(heli.rotation.x,cd>1.05?0.10:-0.14,Math.min(1,rdt*3));
+
+  const ud=heli.userData;
+  ud.rotor.rotation.y+=rdt*34; ud.tail.rotation.x+=rdt*46;
+
+  // rider: hanging from the skid, then a clean ballistic drop
+  const hangY=_hp.y-HANG_DROP;
+  const rd=rider.userData;
+  if(cd>T_RELEASE){
+    rider.position.set(_hp.x,hangY,_hp.z);
+    rider.rotation.set(0,P.yaw+Math.sin(cd*1.6)*0.25,Math.sin(cd*2.2)*0.06);
+    rd.armL.rotation.z=lerp(rd.armL.rotation.z, 2.35,Math.min(1,rdt*6));
+    rd.armR.rotation.z=lerp(rd.armR.rotation.z,-2.35,Math.min(1,rdt*6));
+    rd.upper.rotation.x=lerp(rd.upper.rotation.x,-0.10,Math.min(1,rdt*5));
+  }else{
+    const t=T_RELEASE-cd;
+    const y=Math.max(S.y,(S.y+HOVER_H-HANG_DROP)-0.5*G*t*t);
+    rider.position.set(S.x,y===S.y?S.y-0.30:y,S.z);
+    rider.rotation.set(0,P.yaw,0);
+    poseRider(rider,rdt,{air:y>S.y+0.05,carve:0,gap:y-S.y});
+    if(y<=S.y&&!INTRO.landed){
+      INTRO.landed=true;
+      emitSpray(new THREE.Vector3(S.x,S.y,S.z),new THREE.Vector3(0,0,1),26);
+      blip(150,0.30,"sine",0.14);
+    }
+  }
+  if(heliGain){
+    const dist=Math.max(6,camera.position.distanceTo(_hp));
+    const amp=Math.min(0.16,26/dist*0.10);
+    heliGain.gain.value=amp*(0.55+0.45*Math.abs(Math.sin(performance.now()*0.014)));
+  }
+
+  // camera: wide on the approach, then folded into the chase pose
+  const orbit=1.05+(INTRO_DUR-cd)*0.16;
+  const want=new THREE.Vector3(S.x+Math.sin(orbit)*30,S.y+16,S.z+Math.cos(orbit)*30);
+  const f=new THREE.Vector3(Math.sin(P.yaw),0,Math.cos(P.yaw));
+  const chase=new THREE.Vector3(S.x-f.x*10.5,S.y+3.4,S.z-f.z*10.5);
+  const blend=clamp((1.25-cd)/1.25,0,1);
+  want.lerp(chase,blend*blend);
+  const gh=heightAt(want.x,want.z)+1.6;
+  if(want.y<gh) want.y=gh;
+  camPos.lerp(want,Math.min(1,rdt*(cd>T_HOVER?2.2:4.5)));
+  camera.position.copy(camPos);
+  const look=cd>T_RELEASE ? _hp : rider.position;
+  const aim=new THREE.Vector3(look.x,look.y+1.2,look.z)
+    .lerp(new THREE.Vector3(S.x+f.x*11,S.y+1.6,S.z+f.z*11),blend*blend);
+  camAim.lerp(aim,Math.min(1,rdt*5));
+  camera.lookAt(camAim);
+}
+
 /* ---------- camera ---------- */
 const camPos=new THREE.Vector3(), camAim=new THREE.Vector3();
 function stepCamera(dt,first){
@@ -1495,13 +1634,16 @@ function startRun(broadcast){
   $("hints").classList.remove("hide"); $("hints").classList.remove("gone"); hintsT=7;
   if(MODE!=="time") elGoal.textContent="/ 10,000 TO WIN";
   paintMode();
-  state="countdown"; countdown=3.2; firstFrame=true; initAudio();
+  state="countdown"; countdown=INTRO_DUR; firstFrame=true; initAudio();
+  introReset(); $("introSkip").classList.remove("hide");
 }
 let countdown=0;
 const REEL={i:0,f:0,hold:false,down:0,moved:0,orbit:0};
 function endRun(){
   NET.started=false;
   $("hud").classList.add("hide"); $("zones").classList.add("hide"); $("hints").classList.add("hide");
+  $("introSkip").classList.add("hide"); heli.visible=false;
+  if(heliGain) heliGain.gain.value=0;
   elPark.classList.remove("on");
   recClose();
   if(REC.clips.length){ startReel(); return; }
@@ -1608,12 +1750,20 @@ function frame(t){
   const dt=rdt*TIME;
   stepBackdrop();
   if(state==="countdown"){
-    countdown-=dt;
-    const n=Math.ceil(countdown);
-    showBig(countdown<=0.2?"DROP":(n<=0?"DROP":String(n)),"#0d3a52"); bigT=1;
-    stepCamera(dt,firstFrame); firstFrame=false;
+    countdown-=rdt;
     syncChunks(P.pos.z);
-    if(countdown<=0){ state="run"; elBig.classList.remove("on"); blip(660,0.25,"triangle",0.12); }
+    stepIntro(Math.max(0,countdown),rdt);
+    stepSpray(rdt);
+    if(countdown<=3.05&&countdown>0.05){
+      showBig(String(Math.max(1,Math.min(3,Math.ceil(countdown)))),"#0d3a52"); bigT=1;
+    }
+    firstFrame=false;
+    if(countdown<=0){
+      state="run"; heli.visible=false;
+      if(heliGain) heliGain.gain.value=0;
+      $("introSkip").classList.add("hide");
+      showBig("DROP","#0d3a52"); bigT=0.9; blip(660,0.25,"triangle",0.12);
+    }
   }else if(state==="run"){
     readKeys(); readTouch();
     stepPlayer(dt);

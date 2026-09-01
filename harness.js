@@ -45,6 +45,7 @@ const THREE={
   MeshToonMaterial:function(){return{};},MeshBasicMaterial:function(){return{};},
   ShaderMaterial:function(){return{};},PointsMaterial:function(){return{};},
   SphereGeometry:function(){return geomPlane(1,1,1,1);},
+  CircleGeometry:function(){return geomPlane(1,1,1,1);},
   ConeGeometry:function(){return geomPlane(1,1,1,1);},
   CylinderGeometry:function(){return geomPlane(1,1,1,1);},
   IcosahedronGeometry:function(){return geomPlane(1,1,1,1);},
@@ -97,6 +98,8 @@ const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},hei
   "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD,"+
   "findRail,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding,"+
   "nextParkBand,MAXP,MAXB,terrainKey,get PARK_START(){return PARK_START},"+
-  "setParkStart,loadParkStart,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP};";
+  "setParkStart,loadParkStart,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP,"+
+  "heli,buildHeli,stepIntro,introReset,INTRO,INTRO_DUR,T_HOVER,T_RELEASE,"+
+  "HOVER_H,HANG_DROP};";
 vm.runInContext(code+exportLine,sandbox,{filename:"game.js"});
 module.exports=sandbox;
