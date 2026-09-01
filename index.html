@@ -273,7 +273,7 @@ function grabKindFrom(angle){          // stick direction -> grab
 }
 const CS = 100;            // chunk length (m) along fall line
 const CW = 220;            // chunk width (m)
-const SEGZ = 88, SEGX = 48;
+const SEGZ = 88, SEGX = 72;   // pipe walls need lateral resolution
 const AHEAD = 4, BEHIND = 1;
 const SLOPE = 0.40;
 const G = 26;
@@ -322,6 +322,42 @@ function cumDrop(b){
   return _cum[b];
 }
 
+function parkKind(b){
+  if(PARK_START&&b===1) return "jumps";
+  if(PARK_START&&b===2) return "pipe";
+  return hash2(b,88,SEED)<0.5 ? "jumps" : "pipe";
+}
+let _lane={}, _laneSeed=null;
+function parkRailLane(b){
+  const key=terrainKey();
+  if(_laneSeed!==key){ _lane={}; _laneSeed=key; }
+  if(_lane[b]!==undefined) return _lane[b];
+  const ks=parkKickers(b);
+  let best=0, bestGap=-1, central=null;
+  for(let x=-55;x<=55;x+=2){
+    let gap=1e9;
+    for(const k of ks) gap=Math.min(gap,Math.abs(x-k.xc));
+    if(gap>bestGap){ bestGap=gap; best=x; }
+    // prefer the most central lane that still clears every kicker
+    if(gap>=21 && (central===null||Math.abs(x)<Math.abs(central))) central=x;
+  }
+  _lane[b]=central!==null?central:best;
+  return best;
+}
+function pipeSpec(b){
+  return {xc:(hash2(b,71,SEED)*2-1)*24, fb:7.5, tw:8.5, dw:9, H:5.2};
+}
+function pipeAt(b,x,lz){
+  const p=pipeSpec(b);
+  const win=smoothstep(8,20,lz)*(1-smoothstep(80,93,lz));
+  if(win<=0) return 0;
+  const a=Math.abs(x-p.xc);
+  let h;
+  if(a<p.fb) h=0;
+  else if(a<p.fb+p.tw) h=p.H*smoothstep(p.fb,p.fb+p.tw,a);          // transition wall
+  else h=p.H*(1-smoothstep(p.fb+p.tw,p.fb+p.tw+p.dw,a));            // deck, then back to slope
+  return h*win;
+}
 let _park={}, _parkSeed=null;
 function parkKickers(b){
   const key=terrainKey();
@@ -330,9 +366,9 @@ function parkKickers(b){
   if(!k){
     k=[];
     for(let i=0;i<3;i++) k.push({
-      kz: 20+i*29,
-      xc: (hash2(b,50+i,SEED)*2-1)*42,
-      H : 3.2+hash2(b,60+i,SEED)*2.5
+      kz: 24+i*28,
+      xc: (hash2(b,50+i,SEED)*2-1)*34,
+      H : 5.6+hash2(b,60+i,SEED)*3.4          // 5.6-9.0m booters
     });
     _park[b]=k;
   }
@@ -344,8 +380,8 @@ function kickerAt(b,x,lz){
   for(let i=0;i<3;i++){
     const k=ks[i], u=lz-k.kz;
     let h=0;
-    if(u>-11&&u<=0) h=k.H*smoothstep(-11,0,u);          // run-up ramp
-    else if(u>0&&u<3.4) h=k.H*(1-smoothstep(0,3.4,u));  // lip face falls away
+    if(u>-16&&u<=0) h=k.H*smoothstep(-16,0,u);          // longer run-up keeps the angle sane
+    else if(u>0&&u<6.2) h=k.H*(1-smoothstep(0,6.2,u));  // lip face falls away
     if(h>0) add += h*(1-smoothstep(7,19,Math.abs(x-k.xc)));
   }
   return add;
@@ -355,9 +391,10 @@ function heightAt(x,z){
   const b=Math.max(0,Math.floor(z/CS));
   let y = -z*SLOPE;
   y += x*x*0.0022;                                   // bowl walls keep you on the mountain
-  y += vnoise(x*0.011,z*0.011,SEED)*7.5;
-  y += vnoise(x*0.045,z*0.045,SEED+9)*1.6;
-  y += vnoise(x*0.14,z*0.14,SEED+17)*0.32;           // chatter
+  const nz = vnoise(x*0.011,z*0.011,SEED)*7.5
+           + vnoise(x*0.045,z*0.045,SEED+9)*1.6
+           + vnoise(x*0.14,z*0.14,SEED+17)*0.32;     // chatter
+  y += nz;
   let drop = cumDrop(b);
   const f = featOf(b), lz = z-b*CS;
   if(f==="cliff"){
@@ -368,7 +405,10 @@ function heightAt(x,z){
   }else if(f==="open"){
     y += Math.sin(lz*0.085)*2.4*Math.sin(Math.PI*lz/CS);   // rollers, faded at band seams
   }else if(f==="park"){
-    y += kickerAt(b,x,lz);
+    // a park is groomed: most of the natural roll is planed off, faded to nothing
+    // at the band seams so the terrain stays continuous
+    y -= nz*0.74*Math.sin(Math.PI*lz/CS);
+    y += parkKind(b)==="jumps" ? kickerAt(b,x,lz) : pipeAt(b,x,lz);
   }
   return y-drop;
 }
@@ -406,6 +446,7 @@ const MAT={
   bark:new THREE.MeshToonMaterial({color:0x3a2a22,gradientMap:G3}),
   rock:new THREE.MeshToonMaterial({color:0x59636e,gradientMap:G3,flatShading:true}),
   pole:new THREE.MeshToonMaterial({color:0x27303c,gradientMap:G3}),
+  tube:new THREE.MeshToonMaterial({color:0xbcd8ea,gradientMap:G4,side:THREE.DoubleSide}),
   flag:new THREE.MeshToonMaterial({color:0xff6b4a,gradientMap:G3}),
   ink:new THREE.MeshBasicMaterial({color:0x0e2130,side:THREE.BackSide}),
   body:new THREE.MeshToonMaterial({color:0xff6b4a,gradientMap:G3}),
@@ -472,11 +513,14 @@ const pineGeo=new THREE.ConeGeometry(2.5,9,7,1);
 pineGeo.translate(0,4.5,0);
 const barkGeo=new THREE.CylinderGeometry(0.42,0.55,3,5); barkGeo.translate(0,1.5,0);
 const rockGeo=new THREE.IcosahedronGeometry(1,0);
+const tubeGeo=new THREE.CylinderGeometry(1,1,1,16,1,true);   // open ends: you ride through it
+tubeGeo.rotateX(Math.PI/2);
 const poleGeo=new THREE.CylinderGeometry(0.13,0.16,1,6); poleGeo.translate(0,0.5,0);
 const flagGeo=new THREE.BoxGeometry(1,1,0.10);
 const logGeo=new THREE.CylinderGeometry(1,1,1,8);
 logGeo.rotateX(Math.PI/2);          // axis now runs along +Z, so scale.z is the length
-const MAXT=54, MAXR=26, MAXL=8, MAXP=10, MAXB=6;
+const MAXT=54, MAXR=26, MAXL=8, MAXP=10, MAXB=6, MAXTU=2;
+const TUBE_R=4.7;
 const LOG_R=0.38;
 
 class Chunk{
@@ -495,8 +539,9 @@ class Chunk{
     this.lOut=new THREE.InstancedMesh(logGeo,MAT.ink,MAXL);
     this.poles=new THREE.InstancedMesh(poleGeo,MAT.pole,MAXP);
     this.flags=new THREE.InstancedMesh(flagGeo,MAT.flag,MAXB);
+    this.tubes=new THREE.InstancedMesh(tubeGeo,MAT.tube,MAXTU);
     this.all=[this.mesh,this.trees,this.tOut,this.barks,this.rocks,this.rOut,
-              this.logs,this.lOut,this.poles,this.flags];
+              this.logs,this.lOut,this.poles,this.flags,this.tubes];
     this.all.forEach(m=>{m.frustumCulled=false;m.visible=false;scene.add(m);});
     this.obs=[]; this.band=-1;
   }
@@ -512,15 +557,23 @@ class Chunk{
       // are tinted: cool blue-grey for the ramp, a warm stripe across the takeoff lip
       let r=0.957,g2=0.976,b2=1.0;
       if(isPark){
-        const lz=z-z0, k=kickerAt(b,x,lz);
+        const lz=z-z0, jumps=parkKind(b)==="jumps";
+        // the whole groomed area reads slightly cooler than wild snow
+        const gm=0.30*Math.sin(Math.PI*clamp(lz/CS,0,1));
+        r=r*(1-gm)+0.855*gm; g2=g2*(1-gm)+0.906*gm; b2=b2*(1-gm)+0.953*gm;
+        const k=jumps?kickerAt(b,x,lz):pipeAt(b,x,lz);
         if(k>0.25){
-          const t=Math.min(0.62,k/4.6);
-          r=r*(1-t)+0.706*t; g2=g2*(1-t)+0.796*t; b2=b2*(1-t)+0.878*t;
-          const ks=parkKickers(b);
-          for(const kk of ks){
+          const t=Math.min(0.62,k/6.5);
+          r=r*(1-t)+0.686*t; g2=g2*(1-t)+0.780*t; b2=b2*(1-t)+0.867*t;
+        }
+        if(jumps){
+          for(const kk of parkKickers(b)){
             const u=lz-kk.kz;
-            if(u>-2.6&&u<0.9&&Math.abs(x-kk.xc)<13){ r=1.0; g2=0.796; b2=0.541; break; }
+            if(u>-3.0&&u<1.1&&Math.abs(x-kk.xc)<15){ r=1.0; g2=0.796; b2=0.541; break; }
           }
+        }else{
+          const p=pipeSpec(b), a=Math.abs(x-p.xc);
+          if(Math.abs(a-(p.fb+p.tw))<1.7&&lz>12&&lz<88){ r=1.0; g2=0.796; b2=0.541; }
         }
       }
       carr[i]=r; carr[i+1]=g2; carr[i+2]=b2;
@@ -547,17 +600,50 @@ class Chunk{
     const flag=(x,y,z,w,h,yaw)=>{ if(bi>=MAXB) return;
       d.position.set(x,y,z); d.rotation.set(0,yaw||0,0); d.scale.set(w,h,1);
       d.updateMatrix(); this.flags.setMatrixAt(bi++,d.matrix); };
+    let tu=0;
     if(f==="park"){
-      const ks=parkKickers(b);
-      const gz=z0+ks[0].kz-19, gx=ks[0].xc;
-      pole(gx-11,gz,5.4); pole(gx+11,gz,5.4);
-      flag(gx,heightAt(gx,gz)+4.7,gz,22,1.2,0);
-      for(const k of ks){                       // a flag either side of each takeoff
-        const kz=z0+k.kz;
-        pole(k.xc-11.5,kz,2.6); pole(k.xc+11.5,kz,2.6);
-        flag(k.xc-11.5,heightAt(k.xc-11.5,kz)+2.3,kz,1.7,0.85,0);
+      const jumps=parkKind(b)==="jumps";
+      const lane = jumps ? parkKickers(b)[0].xc : pipeSpec(b).xc;
+      const gz=z0+(jumps?parkKickers(b)[0].kz-24:6);
+      pole(lane-13,gz,5.8); pole(lane+13,gz,5.8);
+      flag(lane,heightAt(lane,gz)+5.1,gz,26,1.3,0);
+      if(jumps){
+        for(const k of parkKickers(b)){         // a flag either side of each takeoff
+          const kz=z0+k.kz;
+          pole(k.xc-12.5,kz,2.8); pole(k.xc+12.5,kz,2.8);
+          flag(k.xc-12.5,heightAt(k.xc-12.5,kz)+2.5,kz,1.8,0.9,0);
+        }
+      }else{
+        const p=pipeSpec(b);                    // deck flags mark the pipe lips
+        for(const lz2 of [30,62]){
+          const zz=z0+lz2, off=p.fb+p.tw;
+          pole(p.xc-off,zz,2.6); pole(p.xc+off,zz,2.6);
+          flag(p.xc+off,heightAt(p.xc+off,zz)+2.3,zz,1.8,0.9,0);
+        }
+      }
+
+      /* --- snow tunnels: a tube you ride straight through --- */
+      const nTu = jumps?1:2;
+      const spots = jumps ? [parkKickers(b)[1].kz+16] : [26,66];
+      for(let i=0;i<nTu&&tu<MAXTU;i++){
+        const len=24+rnd()*11;
+        const tx = jumps ? parkKickers(b)[1].xc : pipeSpec(b).xc;
+        const tz = clamp(z0+spots[i], z0+len/2+3, z0+CS-len/2-3);
+        const hA=heightAt(tx,tz+len/2), hB=heightAt(tx,tz-len/2);
+        const dyT=(hA-hB)/len;
+        let hi=-1e9;
+        for(let a2=-len/2;a2<=len/2;a2+=len/10) hi=Math.max(hi,heightAt(tx,tz+a2)-a2*dyT);
+        const cyT=hi+1.15;
+        d.position.set(tx,cyT,tz);
+        d.rotation.set(Math.atan2(-dyT,1),0,0);
+        d.scale.set(TUBE_R,TUBE_R,len);
+        d.updateMatrix(); this.tubes.setMatrixAt(tu,d.matrix);
+        this.obs.push({x:tx,z:tz,r:TUBE_R,t:3,yaw:0,half:len/2,cy:cyT,dy:dyT});
+        tu++;
       }
     }
+    for(let i=tu;i<MAXTU;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
+      d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.tubes.setMatrixAt(i,d.matrix); }
     for(let i=pi;i<MAXP;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
       d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.poles.setMatrixAt(i,d.matrix); }
     for(let i=bi;i<MAXB;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
@@ -568,14 +654,14 @@ class Chunk{
     for(let i=0;i<MAXL;i++){
       let placed=false;
       for(let attempt=0; attempt<8 && li<nL && !placed; attempt++){
-        const park=f==="park", ks=park?parkKickers(b):null;
-        const k=park?ks[li%3]:null;
-        const len=park?(26+rnd()*16):(16+rnd()*14);
-        const x = park ? (k.xc + (rnd()*2-1)*7) : (rnd()*2-1)*84;
-        const margin=len/2+5;
-        const zc= park ? clamp(z0+k.kz+24+(li>2?rnd()*20:0), z0+margin, z0+CS-margin)
+        const park=f==="park", jumps=park&&parkKind(b)==="jumps";
+        const len=park?(42+rnd()*26):(16+rnd()*14);
+        const lane = park ? (jumps?parkRailLane(b):pipeSpec(b).xc) : 0;
+        const x = park ? (lane+(rnd()*2-1)*(jumps?6:5.0)) : (rnd()*2-1)*84;
+        const margin=len/2+4;
+        const zc= park ? clamp(z0+18+rnd()*(CS-36), z0+margin, z0+CS-margin)
                        : (z0+margin+rnd()*Math.max(1,CS-2*margin));
-        const yaw=(rnd()*2-1)*0.22;
+        const yaw=(rnd()*2-1)*(park?0.09:0.22);
         const sN=Math.sin(yaw), cN=Math.cos(yaw), hl=len/2;
         if(Math.abs(x)>=92) continue;
 
@@ -593,6 +679,13 @@ class Chunk{
         // a trunk is straight: reject any spot where it would bridge a hollow or a
         // cliff lip and hang in mid-air
         if(hi-lo>1.30) continue;
+
+        let tooClose=false;
+        for(const q of this.obs){
+          if(q.t!==2) continue;
+          if(Math.abs(q.x-x)<3.2 && Math.abs(q.z-zc)<(q.half+hl)*0.85){ tooClose=true; break; }
+        }
+        if(tooClose) continue;
 
         const hc=hi;
         d.position.set(x,hc+LOG_R,zc);
@@ -651,7 +744,7 @@ class Chunk{
       this.rocks.setMatrixAt(i,d.matrix); this.rOut.setMatrixAt(i,d.matrix);
     }
     [this.trees,this.tOut,this.barks,this.rocks,this.rOut,this.logs,this.lOut,
-     this.poles,this.flags].forEach(m=>m.instanceMatrix.needsUpdate=true);
+     this.poles,this.flags,this.tubes].forEach(m=>m.instanceMatrix.needsUpdate=true);
     this.all.forEach(m=>m.visible=true);
   }
 }
@@ -994,7 +1087,7 @@ function readTouch(){
 const P={
   pos:new THREE.Vector3(0,0,0), yaw:0, speed:8, vy:0, air:false, airT:0, maxAir:0,
   spinAcc:0, flipAcc:0, roll:0, grabT:0, grabKind:0, tuckT:0, clock:0,
-  grinding:false, grindT:0, railCool:0, railJump:false, railBail:false,
+  grinding:false, grindT:0, railCool:0, railJump:false, railBail:false, tunnelT:0,
   score:0, combo:0, comboT:0, crash:0, alive:true
 };
 function resetPlayer(){
@@ -1003,7 +1096,7 @@ function resetPlayer(){
   chunks.forEach(c=>{ c.band=-1; c.all.forEach(m=>m.visible=false); });
   P.pos.set(0,heightAt(0,0),0); P.yaw=0; P.speed=9; P.vy=0; P.air=false; P.airT=0;
   P.spinAcc=0; P.flipAcc=0; P.roll=0; P.grabT=0; P.grabKind=0; P.tuckT=0; P.clock=0;
-  P.grinding=false; P.grindT=0; P.railCool=0; P.railJump=false; P.railBail=false;
+  P.grinding=false; P.grindT=0; P.railCool=0; P.railJump=false; P.railBail=false; P.tunnelT=0;
   P.score=0; P.combo=0; P.comboT=0; P.crash=0;
   syncChunks(0);
   P.pos.y=heightAt(0,0);
@@ -1213,7 +1306,7 @@ function stepPlayer(dt){
   // obstacles
   if(P.crash<=0){
     for(const o of obstaclesNear(P.pos.z)){
-      if(o.t===2) continue;                      // logs are ridden, never crashed into
+      if(o.t===2||o.t===3) continue;             // logs and tunnels are ridden, never crashed into
       const dx=P.pos.x-o.x, dz=P.pos.z-o.z;
       if(dx*dx+dz*dz < (o.r+0.65)*(o.r+0.65)){
         const oh=heightAt(o.x,o.z);
@@ -1221,6 +1314,31 @@ function stepPlayer(dt){
       }
     }
   }
+  // tunnels: scored for the time you spend inside the tube
+  let inTube=null;
+  for(const o of obstaclesNear(P.pos.z)){
+    if(o.t!==3) continue;
+    const dz=P.pos.z-o.z;
+    if(Math.abs(dz)>o.half) continue;
+    if(Math.abs(P.pos.x-o.x)>o.r*0.72) continue;
+    if(P.pos.y>o.cy+o.dy*dz+o.r*0.55) continue;
+    inTube=o; break;
+  }
+  if(inTube) P.tunnelT+=dt;
+  else if(P.tunnelT>0){
+    const tt=P.tunnelT; P.tunnelT=0;
+    if(tt>0.22){
+      P.combo=Math.min(P.combo+1,9);
+      const m2=Math.min(1+0.22*(P.combo-1),2.6);
+      const pts=Math.round((55+Math.floor(tt*70))*m2);
+      P.score+=pts; P.comboT=4.5;
+      recCredit(pts,"TUNNEL");
+      showTrick("TUNNEL  +"+pts);
+      if(P.combo>1){ elCombo.textContent="COMBO ×"+m2.toFixed(1); elCombo.classList.add("on"); }
+      blip(290,0.18,"sine",0.10);
+    }
+  }
+
   if(P.comboT>0){ P.comboT-=dt; if(P.comboT<=0){ P.combo=0; elCombo.classList.remove("on"); } }
 
   // render transform

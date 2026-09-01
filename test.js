@@ -135,7 +135,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
    A slot left unbuilt renders as a flat plane at y=0 and puts the rider tens of metres
    under (or over) visible snow — which is exactly what this catches. */
 {
-  const CW=220,SEGX=48,SEGZ=88;
+  const CW=220,SEGX=72,SEGZ=88;
   function meshH(ch,x,z){
     const arr=ch.mesh.geometry.attributes.position.array, z0=ch.band*G.CS;
     const fx=(x+CW/2)/CW*SEGX, fz=(z-z0)/G.CS*SEGZ;
@@ -530,7 +530,7 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
         // that no part of it hangs in mid-air
         if(maxClear-minClear>1.35) badSlope++;
         for(const o of c.obs){
-          if(o.t===2) continue;
+          if(o.t===2||o.t===3) continue;   // tunnels are meant to be ridden through
           const along=(o.x-L.x)*sn0+(o.z-L.z)*cs0, lat=(o.x-L.x)*cs0-(o.z-L.z)*sn0;
           if(Math.abs(along)<L.half&&Math.abs(lat)<1.6) treeClash++;
         }
@@ -801,6 +801,132 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(G.heli.userData.tail.rotation.x>tailBefore+10,"so does the tail rotor");
   ok(G.INTRO_DUR>3&&G.INTRO_DUR<7,"the whole sequence is "+G.INTRO_DUR+"s — short enough to sit through");
   ok(G.T_RELEASE<G.T_HOVER,"the rider is released after the hover is established");
+}
+
+/* 32 — the park now has two layouts, and both must stay continuous */
+{
+  G.setSeed(1337); G.setParkStart(true);
+  ok(G.parkKind(1)==="jumps"&&G.parkKind(2)==="pipe",
+     "a park start gives a jump line then a pipe line");
+  G.setParkStart(false);
+  G.setSeed(1337); G.cumDrop(200);
+  let jumps=0,pipes=0;
+  for(let b=1;b<160;b++){ if(G.featOf(b)!=="park") continue;
+    if(G.parkKind(b)==="jumps") jumps++; else pipes++; }
+  ok(jumps>3&&pipes>3,"both layouts occur naturally ("+jumps+" jump, "+pipes+" pipe)");
+
+  let worst=0;
+  for(let b=1;b<160;b++){
+    if(G.featOf(b)!=="park"||G.parkKind(b)!=="pipe") continue;
+    const p=G.pipeSpec(b);
+    for(let z=b*100-2;z<b*100+102;z+=0.1)
+      for(const dx of [0,p.fb,p.fb+p.tw/2,p.fb+p.tw,p.fb+p.tw+p.dw]){
+        const a=G.heightAt(p.xc+dx,z), c2=G.heightAt(p.xc+dx,z+0.1);
+        worst=Math.max(worst,Math.abs(c2-a));
+      }
+  }
+  ok(worst<0.7,"pipe bands are continuous down the fall line (worst 10cm step "+worst.toFixed(3)+"m)");
+}
+
+/* 33 — the halfpipe is actually pipe-shaped */
+{
+  G.setSeed(1337); G.cumDrop(60);
+  let b=-1;
+  for(let i=1;i<160&&b<0;i++) if(G.featOf(i)==="park"&&G.parkKind(i)==="pipe") b=i;
+  const p=G.pipeSpec(b);
+  const at=dx=>G.pipeAt(b,p.xc+dx,50);
+  ok(at(0)<0.01,"the flat bottom is flat");
+  ok(at(p.fb)<0.2,"transitions start at the edge of the flat");
+  ok(at(p.fb+p.tw)>4,"the walls reach "+at(p.fb+p.tw).toFixed(1)+"m at the lip");
+  ok(at(p.fb+p.tw+p.dw)<0.2,"and fall back to the open slope beyond the deck");
+  ok(Math.abs(at(-p.fb-p.tw)-at(p.fb+p.tw))<0.01,"both walls are the same height");
+  // the wall must be rideable, not a cliff
+  const angle=Math.atan(p.H/p.tw)*57.3;
+  ok(angle>20&&angle<45,"the transition sits at "+angle.toFixed(0)+"deg — steep but rideable");
+  ok(G.pipeAt(b,p.xc+p.fb+p.tw,2)<0.01&&G.pipeAt(b,p.xc+p.fb+p.tw,98)<0.01,
+     "the pipe opens and closes inside its band");
+}
+
+/* 34 — tunnels: geometry, and they score when you ride through */
+{
+  G.setSeed(1337); G.setParkStart(true); G.resetPlayer();
+  let tubes=[];
+  for(const bb of [1,2]){
+    G.syncChunks(bb*G.CS+50);
+    for(const c of G.chunks) if(c.band===bb) tubes=tubes.concat(c.obs.filter(o=>o.t===3));
+  }
+  ok(tubes.length>=3,"parks carry tunnels ("+tubes.length+" across two bands)");
+  ok(tubes.every(t=>t.half*2>=20),"tunnels are long enough to be worth riding ("+
+     tubes.map(t=>(t.half*2).toFixed(0)).join("/")+"m)");
+  for(const t of tubes){
+    let clear=1e9;
+    for(let a=-t.half;a<=t.half;a+=t.half/8)
+      clear=Math.min(clear,(t.cy+a*t.dy)-G.heightAt(t.x,t.z+a));
+    ok(clear>-2.5&&clear<3.5,"the tube sits on the snow with headroom (axis "+clear.toFixed(1)+"m up)");
+    break;
+  }
+
+  // ride one through and check it scores
+  const t0=tubes[0];
+  const P=G.P, IN=G.IN;
+  G.syncChunks(t0.z);
+  P.pos.x=t0.x; P.pos.z=t0.z-t0.half-4; P.pos.y=G.heightAt(P.pos.x,P.pos.z);
+  P.yaw=0; P.speed=24; P.air=false; P.grinding=false; P.score=0; P.combo=0; P.tunnelT=0;
+  let inside=0, comboPeak=0;
+  for(let i=0;i<200;i++){
+    IN.carve=0;IN.spin=0;IN.flip=0;IN.hold=false;IN.grabL=false;IN.jump=false;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
+    if(P.tunnelT>0) inside++;
+    comboPeak=Math.max(comboPeak,P.combo);
+  }
+  ok(inside>10,"the rider is tracked inside the tunnel ("+inside+" frames)");
+  ok(P.score>0,"riding through a tunnel scores ("+P.score+")");
+  ok(comboPeak>0,"and extends the combo chain");
+  G.setParkStart(false);
+}
+
+/* 35 — park rails are long, and jump lines keep them clear of the kickers */
+{
+  G.setSeed(1337); G.setParkStart(true); G.resetPlayer();
+  let park=[], wild=[];
+  for(let b=1;b<40;b++){
+    G.syncChunks(b*G.CS+50);
+    for(const c of G.chunks){
+      if(c.band!==b) continue;
+      const mine=c.obs.filter(o=>o.t===2).map(o=>o.half*2);
+      if(G.featOf(b)==="park") park=park.concat(mine); else wild=wild.concat(mine);
+    }
+  }
+  const med=a=>a.sort((x,y)=>x-y)[a.length>>1];
+  ok(park.length>10,"parks are well stocked with rails ("+park.length+")");
+  ok(med(park)>40,"park rails are long (median "+med(park).toFixed(0)+"m)");
+  ok(med(park)>med(wild)*1.8,"and much longer than a wild fallen tree (median "+
+     med(wild).toFixed(0)+"m)");
+
+  // the rail lane must clear every kicker in a jump band
+  for(let b=1;b<160;b++){
+    if(G.featOf(b)!=="park"||G.parkKind(b)!=="jumps") continue;
+    const lane=G.parkRailLane(b);
+    const gap=Math.min(...G.parkKickers(b).map(k=>Math.abs(lane-k.xc)));
+    ok(gap>=20,"band "+b+": rail lane clears the kickers by "+gap.toFixed(0)+"m");
+    ok(Math.abs(lane)<=55,"and stays out of the bowl wall (x="+lane+")");
+    break;
+  }
+  G.setParkStart(false);
+}
+
+/* 36 — bigger jumps */
+{
+  G.setSeed(1337); G.cumDrop(60);
+  let b=-1;
+  for(let i=1;i<160&&b<0;i++) if(G.featOf(i)==="park"&&G.parkKind(i)==="jumps") b=i;
+  const ks=G.parkKickers(b);
+  const heights=ks.map(k=>G.kickerAt(b,k.xc,k.kz));
+  ok(Math.min(...heights)>5,"every kicker stands over 5m tall ("+
+     heights.map(h=>h.toFixed(1)).join("/")+"m)");
+  const ramp=Math.atan(heights[0]/16)*57.3;
+  ok(ramp>18&&ramp<34,"the run-up sits at "+ramp.toFixed(0)+"deg — steep without being a wall");
+  ok(G.kickerAt(b,ks[0].xc,ks[0].kz+7)<0.6,"the lip falls away sharply behind the takeoff");
 }
 
 /* 19 — a stick with no thumb on it never writes input */
