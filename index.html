@@ -318,40 +318,21 @@ function cumDrop(b){
   return _cum[b];
 }
 
-function parkKind(b){
-  if(b<=0) return "run";            // a groomed run-in so you arrive with speed
-  return (b%2)===1 ? "jumps" : "pipe";
-}
-let _lane={}, _laneSeed=null;
-function parkRailLane(b){
-  const key=terrainKey();
-  if(_laneSeed!==key){ _lane={}; _laneSeed=key; }
-  if(_lane[b]!==undefined) return _lane[b];
-  const ks=parkKickers(b);
-  let best=0, bestGap=-1, central=null;
-  for(let x=-55;x<=55;x+=2){
-    let gap=1e9;
-    for(const k of ks) gap=Math.min(gap,Math.abs(x-k.xc));
-    if(gap>bestGap){ bestGap=gap; best=x; }
-    // prefer the most central lane that still clears every kicker
-    if(gap>=21 && (central===null||Math.abs(x)<Math.abs(central))) central=x;
-  }
-  _lane[b]=central!==null?central:best;
-  return best;
-}
-function pipeSpec(b){
-  return {xc:(hash2(b,71,SEED)*2-1)*24, fb:7.5, tw:8.5, dw:9, H:5.2};
-}
-function pipeAt(b,x,lz){
-  const p=pipeSpec(b);
-  const win=smoothstep(8,20,lz)*(1-smoothstep(80,93,lz));
-  if(win<=0) return 0;
-  const a=Math.abs(x-p.xc);
+/* The park is three parallel avenues running the full length of the venue:
+   a continuous halfpipe on the left, a grind lane down the middle, a jump line
+   on the right. Features are laid on a fixed rhythm rather than scattered. */
+const PIPE_X=-55, GRIND_X=0, JUMP_X=55;
+function parkKind(b){ return b<=0 ? "run" : "course"; }
+function pipeSpec(){ return {xc:PIPE_X, fb:7.5, tw:8.5, dw:9, H:5.2}; }
+function pipeAt(x,z){
+  const open=smoothstep(55,135,z);          // opens up once you are off the drop
+  if(open<=0) return 0;
+  const p=pipeSpec(), a=Math.abs(x-p.xc);
   let h;
   if(a<p.fb) h=0;
-  else if(a<p.fb+p.tw) h=p.H*smoothstep(p.fb,p.fb+p.tw,a);          // transition wall
-  else h=p.H*(1-smoothstep(p.fb+p.tw,p.fb+p.tw+p.dw,a));            // deck, then back to slope
-  return h*win;
+  else if(a<p.fb+p.tw) h=p.H*(1-Math.cos(((a-p.fb)/p.tw)*Math.PI/2));
+  else h=p.H*(1-smoothstep(p.fb+p.tw,p.fb+p.tw+p.dw,a));
+  return h*open;
 }
 let _park={}, _parkSeed=null;
 function parkKickers(b){
@@ -360,10 +341,10 @@ function parkKickers(b){
   let k=_park[b];
   if(!k){
     k=[];
-    for(let i=0;i<3;i++) k.push({
-      kz: 24+i*28,
-      xc: (hash2(b,50+i,SEED)*2-1)*34,
-      H : 5.6+hash2(b,60+i,SEED)*3.4          // 5.6-9.0m booters
+    for(let i=0;i<2;i++) k.push({            // two booters per 100m, evenly spaced
+      kz: 30+i*46,
+      xc: JUMP_X+(hash2(b,50+i,SEED)*2-1)*5,
+      H : 6.0+hash2(b,60+i,SEED)*2.8
     });
     _park[b]=k;
   }
@@ -372,7 +353,7 @@ function parkKickers(b){
 function kickerAt(b,x,lz){
   const ks=parkKickers(b);
   let add=0;
-  for(let i=0;i<3;i++){
+  for(let i=0;i<ks.length;i++){
     const k=ks[i], u=lz-k.kz;
     let h=0;
     if(u>-16&&u<=0) h=k.H*smoothstep(-16,0,u);          // longer run-up keeps the angle sane
@@ -402,9 +383,8 @@ function heightAt(x,z){
   }else if(f==="park"){
     // the whole park is groomed, so the planing is constant and cannot seam
     y -= nz*0.74;
-    const kind=parkKind(b);
-    if(kind==="jumps") y += kickerAt(b,x,lz);
-    else if(kind==="pipe") y += pipeAt(b,x,lz);
+    y += pipeAt(x,z);                        // one continuous pipe, all the way down
+    if(b>=1) y += kickerAt(b,x,lz);          // jump line starts after the run-in
   }
   return y-drop;
 }
@@ -557,21 +537,21 @@ class Chunk{
         // the whole groomed area reads slightly cooler than wild snow
         const gm=0.30;
         r=r*(1-gm)+0.855*gm; g2=g2*(1-gm)+0.906*gm; b2=b2*(1-gm)+0.953*gm;
-        const kind=parkKind(b);
-        const k=kind==="jumps"?kickerAt(b,x,lz):kind==="pipe"?pipeAt(b,x,lz):0;
+        // each avenue is tinted so you can pick your lane from the top of the run
+        if(Math.abs(x-GRIND_X)<13){ const t=0.34;
+          r=r*(1-t)+0.792*t; g2=g2*(1-t)+0.820*t; b2=b2*(1-t)+0.855*t; }
+        const kp=pipeAt(x,z), kj=b>=1?kickerAt(b,x,lz):0;
+        const k=Math.max(kp,kj);
         if(k>0.25){
           const t=Math.min(0.62,k/6.5);
           r=r*(1-t)+0.686*t; g2=g2*(1-t)+0.780*t; b2=b2*(1-t)+0.867*t;
         }
-        if(kind==="jumps"){
-          for(const kk of parkKickers(b)){
-            const u=lz-kk.kz;
-            if(u>-3.0&&u<1.1&&Math.abs(x-kk.xc)<15){ r=1.0; g2=0.796; b2=0.541; break; }
-          }
-        }else if(kind==="pipe"){
-          const p=pipeSpec(b), a=Math.abs(x-p.xc);
-          if(Math.abs(a-(p.fb+p.tw))<1.7&&lz>12&&lz<88){ r=1.0; g2=0.796; b2=0.541; }
+        if(b>=1) for(const kk of parkKickers(b)){
+          const u=lz-kk.kz;
+          if(u>-3.0&&u<1.1&&Math.abs(x-kk.xc)<15){ r=1.0; g2=0.796; b2=0.541; break; }
         }
+        const p=pipeSpec(), pa=Math.abs(x-p.xc);
+        if(Math.abs(pa-(p.fb+p.tw))<1.7&&z>90){ r=1.0; g2=0.796; b2=0.541; }
       }
       carr[i]=r; carr[i+1]=g2; carr[i+2]=b2;
     }
@@ -589,48 +569,30 @@ class Chunk{
     const d=new THREE.Object3D();
     d.rotation.order="YXZ";
 
-    /* --- fallen trees: grindable rails lying down the fall line --- */
-    /* --- park signage: a gate you can see coming, and flags on every lip --- */
-    let pi=0, bi=0;
+    /* --- lane gates, kicker flags and the tunnel --- */
+    let pi=0, bi=0, tu=0;
     const pole=(x,z,h)=>{ if(pi>=MAXP) return;
       d.position.set(x,heightAt(x,z),z); d.rotation.set(0,0,0); d.scale.set(1,h,1);
       d.updateMatrix(); this.poles.setMatrixAt(pi++,d.matrix); };
-    const flag=(x,y,z,w,h,yaw)=>{ if(bi>=MAXB) return;
-      d.position.set(x,y,z); d.rotation.set(0,yaw||0,0); d.scale.set(w,h,1);
+    const flag=(x,y,z,w,h)=>{ if(bi>=MAXB) return;
+      d.position.set(x,y,z); d.rotation.set(0,0,0); d.scale.set(w,h,1);
       d.updateMatrix(); this.flags.setMatrixAt(bi++,d.matrix); };
-    let tu=0;
-    if(f==="park"&&parkKind(b)!=="run"){
-      const jumps=parkKind(b)==="jumps";
-      const lane = jumps ? parkKickers(b)[0].xc : pipeSpec(b).xc;
-      const gz=z0+(jumps?parkKickers(b)[0].kz-24:6);
-      pole(lane-13,gz,5.8); pole(lane+13,gz,5.8);
-      flag(lane,heightAt(lane,gz)+5.1,gz,26,1.3,0);
-      if(jumps){
-        for(const k of parkKickers(b)){         // a flag either side of each takeoff
+    if(f==="park"){
+      // gates at the head of every band, so the three avenues read from above
+      for(const lx of [PIPE_X,GRIND_X,JUMP_X]){ pole(lx-9,z0+4,3.2); pole(lx+9,z0+4,3.2); }
+      flag(GRIND_X,heightAt(GRIND_X,z0+4)+2.9,z0+4,17,0.95);
+      if(b>=1){
+        for(const k of parkKickers(b)){
           const kz=z0+k.kz;
-          pole(k.xc-12.5,kz,2.8); pole(k.xc+12.5,kz,2.8);
-          flag(k.xc-12.5,heightAt(k.xc-12.5,kz)+2.5,kz,1.8,0.9,0);
+          flag(k.xc-12.5,heightAt(k.xc-12.5,kz)+2.5,kz,1.9,0.95);
         }
-      }else{
-        const p=pipeSpec(b);                    // deck flags mark the pipe lips
-        for(const lz2 of [30,62]){
-          const zz=z0+lz2, off=p.fb+p.tw;
-          pole(p.xc-off,zz,2.6); pole(p.xc+off,zz,2.6);
-          flag(p.xc+off,heightAt(p.xc+off,zz)+2.3,zz,1.8,0.9,0);
-        }
-      }
-
-      /* --- snow tunnels: a tube you ride straight through --- */
-      const nTu = jumps?1:2;
-      const spots = jumps ? [parkKickers(b)[1].kz+16] : [26,66];
-      for(let i=0;i<nTu&&tu<MAXTU;i++){
-        const len=24+rnd()*11;
-        const tx = jumps ? parkKickers(b)[1].xc : pipeSpec(b).xc;
-        const tz = clamp(z0+spots[i], z0+len/2+3, z0+CS-len/2-3);
+        /* One tunnel, in the jump lane, sitting in the first kicker's landing zone.
+           Thread the bore on the snow, or clear the kicker and ride over the shell. */
+        const len=27, tx=JUMP_X, tz=z0+54;
         const hA=heightAt(tx,tz+len/2), hB=heightAt(tx,tz-len/2);
         const dyT=(hA-hB)/len;
         let hi=-1e9;
-        for(let a2=-len/2;a2<=len/2;a2+=len/10) hi=Math.max(hi,heightAt(tx,tz+a2)-a2*dyT);
+        for(let a2=-len/2;a2<=len/2;a2+=len/12) hi=Math.max(hi,heightAt(tx,tz+a2)-a2*dyT);
         const cyT=hi+1.15;
         d.position.set(tx,cyT,tz);
         d.rotation.set(Math.atan2(-dyT,1),0,0);
@@ -640,70 +602,62 @@ class Chunk{
         tu++;
       }
     }
-    for(let i=tu;i<MAXTU;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
-      d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.tubes.setMatrixAt(i,d.matrix); }
     for(let i=pi;i<MAXP;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
       d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.poles.setMatrixAt(i,d.matrix); }
     for(let i=bi;i<MAXB;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
       d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.flags.setMatrixAt(i,d.matrix); }
+    for(let i=tu;i<MAXTU;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
+      d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.tubes.setMatrixAt(i,d.matrix); }
 
-    const nL = f==="park"?MAXL : (f==="glade"||f==="open")?3 : 1;
-    const kindL = f==="park"?parkKind(b):null;
+    /* --- rails: one long trunk per band down the grind lane, evenly spaced --- */
     let li=0;
-    for(let i=0;i<MAXL;i++){
-      let placed=false;
-      for(let attempt=0; attempt<8 && li<nL && !placed; attempt++){
-        const park=f==="park";
-        const len=park?(42+rnd()*26):(16+rnd()*14);
-        const lane = !park ? 0
-                   : kindL==="jumps" ? parkRailLane(b)
-                   : kindL==="pipe"  ? pipeSpec(b).xc
-                   : 0;                                   // the run-in rails sit centre stage
-        const spread = !park ? 0 : kindL==="jumps" ? 6 : kindL==="pipe" ? 5.0 : 16;
-        const x = park ? (lane+(rnd()*2-1)*spread) : (rnd()*2-1)*84;
-        const margin=len/2+4;
-        const zc= park ? clamp(z0+18+rnd()*(CS-36), z0+margin, z0+CS-margin)
-                       : (z0+margin+rnd()*Math.max(1,CS-2*margin));
-        const yaw=(rnd()*2-1)*(park?0.09:0.22);
-        const sN=Math.sin(yaw), cN=Math.cos(yaw), hl=len/2;
-        if(Math.abs(x)>=92) continue;
-
-        // least-squares fit of a straight trunk to the ground beneath it
-        const NS=25; let sAA=0,sAH=0;
-        const samp=[];
-        for(let j=0;j<NS;j++){
-          const a=-hl+2*hl*j/(NS-1);
-          const hh=heightAt(x+sN*a,zc+cN*a);
-          samp.push([a,hh]); sAA+=a*a; sAH+=a*hh;
-        }
-        const dy=sAH/sAA;
-        let hi=-1e9, lo=1e9;
-        for(const [a,hh] of samp){ const r=hh-a*dy; if(r>hi)hi=r; if(r<lo)lo=r; }
-        // a trunk is straight: reject any spot where it would bridge a hollow or a
-        // cliff lip and hang in mid-air
-        if(hi-lo>1.30) continue;
-
-        let tooClose=false;
-        for(const q of this.obs){
-          if(q.t!==2) continue;
-          if(Math.abs(q.x-x)<3.2 && Math.abs(q.z-zc)<(q.half+hl)*0.85){ tooClose=true; break; }
-        }
-        if(tooClose) continue;
-
-        const hc=hi;
-        d.position.set(x,hc+LOG_R,zc);
-        d.rotation.set(Math.atan2(-dy,1),yaw,0);
-        d.scale.set(LOG_R,LOG_R,len);
-        d.updateMatrix(); this.logs.setMatrixAt(li,d.matrix);
-        d.scale.set(LOG_R*1.14,LOG_R*1.14,len*1.005);
-        d.updateMatrix(); this.lOut.setMatrixAt(li,d.matrix);
-        this.obs.push({x,z:zc,r:LOG_R,t:2,yaw,half:hl,cy:hc+LOG_R*2,dy});
-        li++; placed=true;
+    const placeLog=(x,zc,len,yaw)=>{
+      if(li>=MAXL) return false;
+      const sN=Math.sin(yaw), cN=Math.cos(yaw), hl=len/2;
+      const NS=25; let sAA=0,sAH=0; const samp=[];
+      for(let j=0;j<NS;j++){
+        const a=-hl+2*hl*j/(NS-1);
+        const hh=heightAt(x+sN*a,zc+cN*a);
+        samp.push([a,hh]); sAA+=a*a; sAH+=a*hh;
       }
-      if(!placed){
-        d.position.set(0,-9999,0); d.rotation.set(0,0,0); d.scale.set(0.001,0.001,0.001);
-        d.updateMatrix(); this.logs.setMatrixAt(i,d.matrix); this.lOut.setMatrixAt(i,d.matrix);
+      const dy=sAH/sAA;
+      let hi=-1e9, lo=1e9;
+      for(const [a,hh] of samp){ const r2=hh-a*dy; if(r2>hi)hi=r2; if(r2<lo)lo=r2; }
+      if(hi-lo>1.30) return false;
+      d.position.set(x,hi+LOG_R,zc);
+      d.rotation.set(Math.atan2(-dy,1),yaw,0);
+      d.scale.set(LOG_R,LOG_R,len);
+      d.updateMatrix(); this.logs.setMatrixAt(li,d.matrix);
+      d.scale.set(LOG_R*1.14,LOG_R*1.14,len*1.005);
+      d.updateMatrix(); this.lOut.setMatrixAt(li,d.matrix);
+      this.obs.push({x,z:zc,r:LOG_R,t:2,yaw,half:hl,cy:hi+LOG_R*2,dy});
+      li++; return true;
+    };
+    if(f==="park"){
+      if(b>=1){
+        const side=(b%2)?1:-1;
+        // the main line sits dead on the lane centre — the capture corridor is under
+        // a metre wide, so even a small offset makes it unfindable
+        placeLog(GRIND_X, z0+46, 52, 0);
+        placeLog(GRIND_X+side*9.5, z0+20, 26, side*0.05);  // a second rail off to one side
+      }else{
+        placeLog(GRIND_X, z0+64, 44, 0);                   // one rail on the run-in
       }
+    }else{
+      const nW=(f==="glade"||f==="open")?3:1;
+      for(let i=0;i<MAXL&&li<nW;i++){
+        for(let attempt=0;attempt<8;attempt++){
+          const len=16+rnd()*14, margin=len/2+4;
+          const x=(rnd()*2-1)*84;
+          const zc=z0+margin+rnd()*Math.max(1,CS-2*margin);
+          if(Math.abs(x)>=92) continue;
+          if(placeLog(x,zc,len,(rnd()*2-1)*0.22)) break;
+        }
+      }
+    }
+    for(let i=li;i<MAXL;i++){
+      d.position.set(0,-9999,0); d.rotation.set(0,0,0); d.scale.set(0.001,0.001,0.001);
+      d.updateMatrix(); this.logs.setMatrixAt(i,d.matrix); this.lOut.setMatrixAt(i,d.matrix);
     }
     const logs=this.obs.slice();
     const clearOfLogs=(x,z)=>logs.every(L=>{
@@ -1090,7 +1044,8 @@ function readTouch(){
 const P={
   pos:new THREE.Vector3(0,0,0), yaw:0, speed:8, vy:0, air:false, airT:0, maxAir:0,
   spinAcc:0, flipAcc:0, roll:0, grabT:0, grabKind:0, tuckT:0, clock:0,
-  grinding:false, grindT:0, railCool:0, railJump:false, railBail:false, tunnelT:0,
+  grinding:false, grindT:0, railCool:0, railJump:false, railBail:false, tunnelT:0, onTube:false,
+  wallT:0, wallH:0,
   score:0, combo:0, comboT:0, crash:0, alive:true
 };
 function resetPlayer(){
@@ -1099,7 +1054,7 @@ function resetPlayer(){
   chunks.forEach(c=>{ c.band=-1; c.all.forEach(m=>m.visible=false); });
   P.pos.set(0,heightAt(0,0),0); P.yaw=0; P.speed=9; P.vy=0; P.air=false; P.airT=0;
   P.spinAcc=0; P.flipAcc=0; P.roll=0; P.grabT=0; P.grabKind=0; P.tuckT=0; P.clock=0;
-  P.grinding=false; P.grindT=0; P.railCool=0; P.railJump=false; P.railBail=false; P.tunnelT=0;
+  P.grinding=false; P.grindT=0; P.railCool=0; P.railJump=false; P.railBail=false; P.tunnelT=0; P.onTube=false; P.wallT=0; P.wallH=0;
   P.score=0; P.combo=0; P.comboT=0; P.crash=0;
   syncChunks(0);
   P.pos.y=heightAt(0,0);
@@ -1185,6 +1140,21 @@ function findRail(){
   }
   return null;
 }
+/* A tunnel is solid: below the axis you are threading the bore, above it you are
+   riding the shell, which sheds you sideways and launches you off the far end. */
+function findTube(){
+  for(const o of obstaclesNear(P.pos.z)){
+    if(o.t!==3) continue;
+    const dz=P.pos.z-o.z;
+    if(Math.abs(dz)>o.half) continue;
+    const lat=P.pos.x-o.x;
+    if(Math.abs(lat)>o.r*0.98) continue;
+    const axis=o.cy+o.dy*dz;
+    return {o,lat,axis,surfaceY:axis+Math.sqrt(Math.max(0,o.r*o.r-lat*lat)),
+            onTop:P.pos.y>axis-0.10};
+  }
+  return null;
+}
 function endGrind(){
   if(!P.grinding) return;
   P.grinding=false;
@@ -1192,7 +1162,7 @@ function endGrind(){
   if(t<0.30) return;
   P.combo=Math.min(P.combo+1,9);
   const mult=Math.min(1+0.22*(P.combo-1),2.6);
-  const pts=Math.round((Math.floor(t*105)+(t>1.6?90:0))*mult);
+  const pts=Math.round((Math.floor(t*58)+(t>1.8?80:0))*mult);
   P.score+=pts; P.comboT=4.5;
   recCredit(pts,"RAIL "+t.toFixed(1)+"s");
   showTrick("RAIL "+t.toFixed(1)+"s  +"+pts);
@@ -1265,6 +1235,7 @@ function stepPlayer(dt){
   if(P.railCool>0) P.railCool-=dt;
 
   const rail=findRail();
+  const tube=findTube();
   if(rail){
     if(P.air) resolveLanding();                 // score the trick that put you here
     P.grinding=true; P.grindT+=dt;
@@ -1280,8 +1251,23 @@ function stepPlayer(dt){
     else if(P.railBail||Math.abs(IN.carve)>0.75) endGrind();
     P.railJump=false; P.railBail=false; IN.jump=false;
     if(P.speed>6&&Math.random()<0.5) emitSpray(P.pos,f2,1);
+  }else if(tube&&tube.onTop){
+    if(P.grinding) endGrind();
+    if(P.air&&P.pos.y<=tube.surfaceY){
+      P.pos.y=tube.surfaceY; P.vy=0; resolveLanding();
+      if(P.speed>10) emitSpray(P.pos,f2,10);
+    }else if(!P.air){ P.pos.y=tube.surfaceY; P.vy=0; }
+    if(!P.air){                                   // the curved shell sheds you sideways
+      P.pos.x += (tube.lat/tube.o.r)*7.5*dt;
+      P.roll=lerp(P.roll,-(tube.lat/tube.o.r)*0.35,dt*6);
+    }
+    P.onTube=true;
   }else{
   if(P.grinding) endGrind();
+  if(P.onTube){                                   // ran off the end of the shell
+    P.onTube=false;
+    if(!P.air&&P.pos.y>gh2+0.30){ P.air=true; P.vy=0; P.airT=0; }
+  }
   if(!P.air){
     // leave the ground when the terrain drops away faster than a ballistic arc
     const D=4.0;
@@ -1317,6 +1303,26 @@ function stepPlayer(dt){
       }
     }
   }
+  /* Pipe wall rides. The launch test only samples ahead of the rider, so a lateral
+     lip can never throw you — the pipe is scored on how high and how long you hold
+     the transition instead. */
+  const wallH = PARK_MODE ? pipeAt(P.pos.x,P.pos.z) : 0;
+  if(!P.air&&!P.grinding&&P.crash<=0&&wallH>1.6){
+    P.wallT+=dt; P.wallH=Math.max(P.wallH,wallH);
+  }else if(P.wallT>0){
+    const wt=P.wallT, wh=P.wallH; P.wallT=0; P.wallH=0;
+    if(wt>0.30){
+      P.combo=Math.min(P.combo+1,9);
+      const m3=Math.min(1+0.22*(P.combo-1),2.6);
+      const pts=Math.round((Math.round(wh*16)+Math.floor(wt*24))*m3);
+      P.score+=pts; P.comboT=4.5;
+      recCredit(pts,"WALL RIDE "+wh.toFixed(1)+"m");
+      showTrick("WALL RIDE "+wh.toFixed(1)+"m  +"+pts);
+      if(P.combo>1){ elCombo.textContent="COMBO ×"+m3.toFixed(1); elCombo.classList.add("on"); }
+      blip(380+wh*30,0.13,"triangle",0.10);
+    }
+  }
+
   // tunnels: scored for the time you spend inside the tube
   let inTube=null;
   for(const o of obstaclesNear(P.pos.z)){
