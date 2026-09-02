@@ -471,14 +471,14 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
 
 /* 20 — stunt park: kicker ramps are built into the terrain itself */
 {
-  G.setSeed(1337); G.cumDrop(200);
+  G.setSeed(1337); G.setParkMode(true); G.cumDrop(200);
   let parks=0;
   for(let b=1;b<160;b++) if(G.featOf(b)==="park") parks++;
-  ok(parks>10,"park bands appear regularly ("+parks+"/159)");
+  ok(parks===159,"the whole park venue is park, top to bottom ("+parks+"/159)");
 
   let worstStep=0, tallest=0;
   for(let b=1;b<160;b++){
-    if(G.featOf(b)!=="park") continue;
+    if(G.parkKind(b)!=="jumps") continue;
     const ks=G.parkKickers(b);
     ok(ks.length===3,"each park has three kickers");
     for(const k of ks){
@@ -496,10 +496,11 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
 
   // the ramp must return to zero, or the whole band would sit permanently raised
   for(let b=1;b<160;b++){
-    if(G.featOf(b)!=="park") continue;
+    if(G.parkKind(b)!=="jumps") continue;
     ok(G.kickerAt(b,0,0)===0&&G.kickerAt(b,0,99.9)===0,"kickers fade out at the band seams");
     break;
   }
+  G.setParkMode(false);
 }
 
 /* 21 — fallen trees exist, sit on the snow, and keep other scenery clear */
@@ -623,30 +624,52 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(above===0,"and below board height rather than up into the camera ("+above+" bad)");
 }
 
-/* 25 — parks must be findable: signposted, and one early in every run */
+/* 25 — the two venues are completely separate */
 {
   for(const sd of [1337,42,90210,7,555001,314159]){
-    G.setSeed(sd); G.cumDrop(60);
-    let first=-1;
-    for(let b=1;b<60&&first<0;b++) if(G.featOf(b)==="park") first=b;
-    ok(first>0&&first<=3,"seed "+sd+": a park appears within 300m (band "+first+")");
+    G.setSeed(sd); G.setParkMode(false); G.cumDrop(60);
+    let parks=0;
+    for(let b=1;b<160;b++) if(G.featOf(b)==="park") parks++;
+    ok(parks===0,"seed "+sd+": a free run contains no park at all");
   }
-  G.setSeed(1337); G.resetPlayer();
-  ok(G.nextParkBand(0)===3,"the park finder points at the first park from the gate");
-  ok(G.nextParkBand(320)===3,"while you are inside the park it still reads as the park");
-  ok(G.nextParkBand(420)>3,"and moves on to the next one once you are past");
+  G.setSeed(1337); G.setParkMode(true); G.resetPlayer();
+  let trees=0, rocks=0;
+  for(let b=0;b<20;b++){
+    G.syncChunks(b*G.CS+50);
+    for(const c of G.chunks){
+      if(c.band!==b) continue;
+      for(const o of c.obs){ if(o.t===0) trees++; if(o.t===1) rocks++; }
+    }
+  }
+  ok(trees===0,"2km of park contains not one tree ("+trees+")");
+  ok(rocks===0,"and not one rock ("+rocks+")");
 
-  // signage instances actually get written for park bands and cleared elsewhere
-  G.syncChunks(350);
-  const park=G.chunks.find(c=>c.band===3);
-  ok(!!park&&G.featOf(3)==="park","band 3 is the park");
-  ok(!!park.poles&&!!park.flags,"the park chunk carries gate and flag instances");
-  ok(park.poles.count===G.MAXP&&park.flags.count===G.MAXB,"signage pools are fixed size");
+  ok(G.parkKind(0)==="run","the park opens with a groomed run-in so you arrive with speed");
+  ok(G.parkKind(1)==="jumps"&&G.parkKind(2)==="pipe"&&G.parkKind(3)==="jumps",
+     "then alternates jump line and pipe line all the way down");
+  let bump=0;
+  const h0=G.heightAt(0,0), h1=G.heightAt(0,100);
+  for(let z=0;z<100;z+=0.5) bump=Math.max(bump,Math.abs(G.heightAt(0,z)-(h0+(h1-h0)*z/100)));
+  ok(bump<2.5,"the run-in band is plain groomed snow — no kicker off the helicopter ("+
+     bump.toFixed(1)+"m of roll)");
+
+  // grooming is uniform now, so it must not seam at band joins
+  let worst=0;
+  for(let z=0;z<2400;z+=0.05)
+    for(const x of [-30,-8,0,14,36])
+      worst=Math.max(worst,Math.abs(G.heightAt(x,z+0.05)-G.heightAt(x,z)));
+  ok(worst<0.7,"2.4km of park is continuous with no band seams (worst 5cm step "+worst.toFixed(3)+"m)");
+
+  // signage instances still get written where features exist
+  G.syncChunks(150);
+  const jump=G.chunks.find(c=>c.band===1);
+  ok(!!jump&&jump.poles.count===G.MAXP,"signage pools are attached to park chunks");
+  G.setParkMode(false);
 }
 
 /* 26 — highlight capture: only eventful moments, best three kept */
 {
-  G.setSeed(1337); G.resetPlayer(); G.recReset();
+  G.setSeed(1337); G.setParkMode(false); G.resetPlayer(); G.recReset();
   const P=G.P, IN=G.IN;
   for(let i=0;i<60*200;i++){
     IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
@@ -690,18 +713,18 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
    A 20deg ramp on a 22deg slope in untextured white snow is invisible, so groomed
    features are vertex-tinted. */
 {
-  G.setSeed(1337); G.setParkStart(false); G.resetPlayer();
-  G.syncChunks(350);
-  const park=G.chunks.find(c=>c.band===3);
-  const plain=G.chunks.find(c=>c.band===2);   // open snow, loaded alongside the park
-  ok(!!park.mesh.geometry.attributes.color,"terrain carries a colour attribute");
-  const pc=park.mesh.geometry.attributes.color.array;
-  const oc=plain.mesh.geometry.attributes.color.array;
+  G.setSeed(1337); G.setParkMode(true); G.resetPlayer();
+  G.syncChunks(150);
+  const parkChunk=G.chunks.find(c=>c.band===1);
+  ok(!!parkChunk.mesh.geometry.attributes.color,"terrain carries a colour attribute");
+  const pc=Array.from(parkChunk.mesh.geometry.attributes.color.array);
+  G.setParkMode(false); G.resetPlayer(); G.syncChunks(350);
+  const oc=Array.from(G.chunks.find(c=>c.band===3).mesh.geometry.attributes.color.array);
   const uniq=new Set();
   for(let i=0;i<pc.length;i+=3) uniq.add(pc[i].toFixed(3)+","+pc[i+1].toFixed(3));
   const plainUniq=new Set();
   for(let i=0;i<oc.length;i+=3) plainUniq.add(oc[i].toFixed(3)+","+oc[i+1].toFixed(3));
-  ok(plainUniq.size===1,"open snow is a single flat tone");
+  ok(plainUniq.size===1,"wild snow is a single flat tone");
   ok(uniq.size>=3,"a park band paints ramp and lip tones as well as snow ("+uniq.size+" tones)");
   let ramp=0, lip=0;
   for(let i=0;i<pc.length;i+=3){
@@ -710,35 +733,33 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   }
   ok(ramp>20,"the ramp face is tinted across "+ramp+" vertices");
   ok(lip>0,"the takeoff lip carries a warm marker stripe ("+lip+" vertices)");
+  G.setParkMode(false);
 }
 
-/* 29 — dropping straight into the park */
+/* 29 — switching venue rebuilds the mountain safely */
 {
   G.setSeed(1337);
-  G.setParkStart(false);
-  const normal=[0,1,2,3].map(b=>G.featOf(b));
-  const keyOff=G.terrainKey();
-  G.setParkStart(true);
-  ok(G.PARK_START===true,"the option turns on");
-  ok(G.featOf(1)==="park"&&G.featOf(2)==="park","bands 1 and 2 become a 200m park");
-  ok(G.featOf(0)==="open","band 0 stays open so you can build speed into it");
-  ok(G.terrainKey()!==keyOff,
+  G.setParkMode(false);
+  const keyFree=G.terrainKey();
+  G.setParkMode(true);
+  ok(G.PARK_MODE===true,"the venue switches");
+  ok(G.terrainKey()!==keyFree,
      "the terrain cache key changes, so cliff and kicker caches cannot go stale");
-  G.loadParkStart();
-  ok(G.PARK_START===true,"the choice is remembered across a reload");
+  G.loadParkMode();
+  ok(G.PARK_MODE===true,"the choice is remembered across a reload");
 
-  // the park you drop into must actually be reachable at speed
-  G.setParkStart(true); G.resetPlayer();
+  // riding the park from the drop must reach features without steering
+  G.setParkMode(true); G.resetPlayer();
   const P=G.P, IN=G.IN;
-  let reached=0, air=0;
-  for(let i=0;i<60*30;i++){
+  let air=0, reached=0;
+  for(let i=0;i<60*40;i++){
     IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
     G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
-    if(P.pos.z>100&&P.pos.z<300){ reached++; if(P.air) air++; }
+    if(P.pos.z>100){ reached++; if(P.air) air++; }
   }
-  ok(reached>0,"the rider reaches the park without steering");
-  ok(air>30,"and gets airborne inside it ("+(air/60).toFixed(1)+"s of air)");
-  G.setParkStart(false);
+  ok(reached>0,"the rider reaches the first jump line");
+  ok(air>30,"and gets airborne in it ("+(air/60).toFixed(1)+"s of air)");
+  G.setParkMode(false);
 }
 
 /* 30 — the drop-off: the helicopter must actually fly a path, hand the rider over,
@@ -805,11 +826,11 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
 
 /* 32 — the park now has two layouts, and both must stay continuous */
 {
-  G.setSeed(1337); G.setParkStart(true);
+  G.setSeed(1337); G.setParkMode(true);
   ok(G.parkKind(1)==="jumps"&&G.parkKind(2)==="pipe",
      "a park start gives a jump line then a pipe line");
-  G.setParkStart(false);
-  G.setSeed(1337); G.cumDrop(200);
+  G.setParkMode(false);
+  G.setSeed(1337); G.setParkMode(true); G.cumDrop(200);
   let jumps=0,pipes=0;
   for(let b=1;b<160;b++){ if(G.featOf(b)!=="park") continue;
     if(G.parkKind(b)==="jumps") jumps++; else pipes++; }
@@ -826,13 +847,14 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
       }
   }
   ok(worst<0.7,"pipe bands are continuous down the fall line (worst 10cm step "+worst.toFixed(3)+"m)");
+  G.setParkMode(false);
 }
 
 /* 33 — the halfpipe is actually pipe-shaped */
 {
-  G.setSeed(1337); G.cumDrop(60);
+  G.setSeed(1337); G.setParkMode(true); G.cumDrop(60);
   let b=-1;
-  for(let i=1;i<160&&b<0;i++) if(G.featOf(i)==="park"&&G.parkKind(i)==="pipe") b=i;
+  for(let i=1;i<160&&b<0;i++) if(G.parkKind(i)==="pipe") b=i;
   const p=G.pipeSpec(b);
   const at=dx=>G.pipeAt(b,p.xc+dx,50);
   ok(at(0)<0.01,"the flat bottom is flat");
@@ -845,11 +867,12 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(angle>20&&angle<45,"the transition sits at "+angle.toFixed(0)+"deg — steep but rideable");
   ok(G.pipeAt(b,p.xc+p.fb+p.tw,2)<0.01&&G.pipeAt(b,p.xc+p.fb+p.tw,98)<0.01,
      "the pipe opens and closes inside its band");
+  G.setParkMode(false);
 }
 
 /* 34 — tunnels: geometry, and they score when you ride through */
 {
-  G.setSeed(1337); G.setParkStart(true); G.resetPlayer();
+  G.setSeed(1337); G.setParkMode(true); G.resetPlayer();
   let tubes=[];
   for(const bb of [1,2]){
     G.syncChunks(bb*G.CS+50);
@@ -882,21 +905,23 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   ok(inside>10,"the rider is tracked inside the tunnel ("+inside+" frames)");
   ok(P.score>0,"riding through a tunnel scores ("+P.score+")");
   ok(comboPeak>0,"and extends the combo chain");
-  G.setParkStart(false);
+  G.setParkMode(false);
 }
 
 /* 35 — park rails are long, and jump lines keep them clear of the kickers */
 {
-  G.setSeed(1337); G.setParkStart(true); G.resetPlayer();
-  let park=[], wild=[];
-  for(let b=1;b<40;b++){
-    G.syncChunks(b*G.CS+50);
-    for(const c of G.chunks){
-      if(c.band!==b) continue;
-      const mine=c.obs.filter(o=>o.t===2).map(o=>o.half*2);
-      if(G.featOf(b)==="park") park=park.concat(mine); else wild=wild.concat(mine);
+  const gather=()=>{ let out=[]; G.resetPlayer();
+    for(let b=1;b<40;b++){
+      G.syncChunks(b*G.CS+50);
+      for(const c of G.chunks) if(c.band===b)
+        out=out.concat(c.obs.filter(o=>o.t===2).map(o=>o.half*2));
     }
-  }
+    return out; };
+  G.setSeed(1337); G.setParkMode(true);
+  const park=gather();
+  G.setParkMode(false);
+  const wild=gather();
+  G.setParkMode(true);
   const med=a=>a.sort((x,y)=>x-y)[a.length>>1];
   ok(park.length>10,"parks are well stocked with rails ("+park.length+")");
   ok(med(park)>40,"park rails are long (median "+med(park).toFixed(0)+"m)");
@@ -912,14 +937,14 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
     ok(Math.abs(lane)<=55,"and stays out of the bowl wall (x="+lane+")");
     break;
   }
-  G.setParkStart(false);
+  G.setParkMode(false);
 }
 
 /* 36 — bigger jumps */
 {
-  G.setSeed(1337); G.cumDrop(60);
+  G.setSeed(1337); G.setParkMode(true); G.cumDrop(60);
   let b=-1;
-  for(let i=1;i<160&&b<0;i++) if(G.featOf(i)==="park"&&G.parkKind(i)==="jumps") b=i;
+  for(let i=1;i<160&&b<0;i++) if(G.parkKind(i)==="jumps") b=i;
   const ks=G.parkKickers(b);
   const heights=ks.map(k=>G.kickerAt(b,k.xc,k.kz));
   ok(Math.min(...heights)>5,"every kicker stands over 5m tall ("+
@@ -927,6 +952,32 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   const ramp=Math.atan(heights[0]/16)*57.3;
   ok(ramp>18&&ramp<34,"the run-up sits at "+ramp.toFixed(0)+"deg — steep without being a wall");
   ok(G.kickerAt(b,ks[0].xc,ks[0].kz+7)<0.6,"the lip falls away sharply behind the takeoff");
+  G.setParkMode(false);
+}
+
+/* 37 — the two venues must be comparably long to win */
+{
+  const race=park=>{
+    G.setSeed(1337); G.setParkMode(park); G.resetPlayer();
+    const P=G.P, IN=G.IN; let t=0;
+    const target=G.goalNow();
+    for(let i=0;i<60*900&&P.score<target;i++){
+      IN.carve=0;IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
+      if(!P.air&&!P.grinding&&P.crash<=0){ IN.hold=(i%110)>25; if(i%110===0) IN.jump=true; }
+      if(P.air&&P.airT>0.15){ const g=P.pos.y-G.heightAt(P.pos.x,P.pos.z);
+        if(g>6){ IN.spin=1; IN.grabL=true; IN.grabDir=Math.PI/2; } }
+      G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60); t+=1/60;
+    }
+    return {t,score:P.score,target};
+  };
+  G.setParkMode(false); ok(G.goalNow()===G.GOAL,"the free run targets 10,000");
+  G.setParkMode(true);  ok(G.goalNow()===G.GOAL_PARK,"the park targets "+G.GOAL_PARK.toLocaleString());
+  const free=race(false), park=race(true);
+  ok(free.score>=free.target&&park.score>=park.target,"both targets are reachable");
+  const ratio=park.t/free.t;
+  ok(ratio>0.6&&ratio<1.7,"a park race takes "+(park.t/60).toFixed(1)+
+     " min against "+(free.t/60).toFixed(1)+" min on the mountain (ratio "+ratio.toFixed(2)+")");
+  G.setParkMode(false);
 }
 
 /* 19 — a stick with no thumb on it never writes input */

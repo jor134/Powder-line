@@ -178,7 +178,7 @@
 
 <div id="title" class="panel">
   <h1>POWDER<br>LINE<span>ENDLESS</span></h1>
-  <div class="sub">Point it down the fall line. Every cornice is a scoring chance. First rider to 10,000 ends the run.</div>
+  <div class="sub">FREE RUN is the open mountain — cornices, glades, boulder fields and fallen timber. STUNT PARK is a built course: booters, pipes, tunnels and long rails, no trees at all.</div>
   <button id="bSolo">RIDE SOLO</button>
   <button id="bMulti" class="ghost">RIDE WITH FRIENDS</button>
   <button id="bInstall" class="ghost hide">INSTALL APP</button>
@@ -190,9 +190,9 @@
     </div>
   </div>
   <div class="seg" id="startSeg">
-    <div class="lbl" style="margin-bottom:6px">DROP IN</div>
+    <div class="lbl" style="margin-bottom:6px">VENUE</div>
     <div class="row">
-      <button class="sm ghost start-b" data-ps="0">OPEN MOUNTAIN</button>
+      <button class="sm ghost start-b" data-ps="0">FREE RUN</button>
       <button class="sm ghost start-b" data-ps="1">STUNT PARK</button>
     </div>
   </div>
@@ -257,6 +257,8 @@
    ============================================================ */
 
 const GOAL = 10000;
+const GOAL_PARK = 25000;    // a park run scores ~3x faster: no trees, no broken combos
+function goalNow(){ return PARK_MODE?GOAL_PARK:GOAL; }
 const TIME = 0.90;          // global slow-motion factor
 const RUN_SECONDS = 120;    // time attack length
 const GRABS=[
@@ -296,20 +298,14 @@ function vnoise(x,y,s){
 }
 
 /* ---------- terrain feature bands ---------- */
-const FEAT=["open","cliff","glade","park","boulder","cliff","open","glade","park","cliff","boulder","open"];
-let PARK_START=false;
+const FEAT=["open","cliff","glade","boulder","cliff","open","glade","cliff","boulder","open"];
+let PARK_MODE=false;
 function featOf(b){
-  if(PARK_START&&(b===1||b===2)) return "park";   // drop straight into a 200m park
+  if(PARK_MODE) return "park";      // the park is its own venue, all the way down
   if(b<1) return "open";
-  if(b===3) return "park";          // every mountain has a park within the first 400m
   return FEAT[Math.floor(hash2(b,7,SEED)*FEAT.length)%FEAT.length];
 }
-function terrainKey(){ return SEED+(PARK_START?7777777:0); }
-function nextParkBand(z){
-  const b=Math.max(0,Math.floor(z/CS));
-  for(let i=0;i<14;i++) if(featOf(b+i)==="park") return b+i;
-  return -1;
-}
+function terrainKey(){ return SEED+(PARK_MODE?7777777:0); }
 function dropOf(b){
   if(featOf(b)!=="cliff") return 0;
   return 9+hash2(b,23,SEED)*13;               // 9–22 m cornice
@@ -323,9 +319,8 @@ function cumDrop(b){
 }
 
 function parkKind(b){
-  if(PARK_START&&b===1) return "jumps";
-  if(PARK_START&&b===2) return "pipe";
-  return hash2(b,88,SEED)<0.5 ? "jumps" : "pipe";
+  if(b<=0) return "run";            // a groomed run-in so you arrive with speed
+  return (b%2)===1 ? "jumps" : "pipe";
 }
 let _lane={}, _laneSeed=null;
 function parkRailLane(b){
@@ -405,10 +400,11 @@ function heightAt(x,z){
   }else if(f==="open"){
     y += Math.sin(lz*0.085)*2.4*Math.sin(Math.PI*lz/CS);   // rollers, faded at band seams
   }else if(f==="park"){
-    // a park is groomed: most of the natural roll is planed off, faded to nothing
-    // at the band seams so the terrain stays continuous
-    y -= nz*0.74*Math.sin(Math.PI*lz/CS);
-    y += parkKind(b)==="jumps" ? kickerAt(b,x,lz) : pipeAt(b,x,lz);
+    // the whole park is groomed, so the planing is constant and cannot seam
+    y -= nz*0.74;
+    const kind=parkKind(b);
+    if(kind==="jumps") y += kickerAt(b,x,lz);
+    else if(kind==="pipe") y += pipeAt(b,x,lz);
   }
   return y-drop;
 }
@@ -559,19 +555,20 @@ class Chunk{
       if(isPark){
         const lz=z-z0, jumps=parkKind(b)==="jumps";
         // the whole groomed area reads slightly cooler than wild snow
-        const gm=0.30*Math.sin(Math.PI*clamp(lz/CS,0,1));
+        const gm=0.30;
         r=r*(1-gm)+0.855*gm; g2=g2*(1-gm)+0.906*gm; b2=b2*(1-gm)+0.953*gm;
-        const k=jumps?kickerAt(b,x,lz):pipeAt(b,x,lz);
+        const kind=parkKind(b);
+        const k=kind==="jumps"?kickerAt(b,x,lz):kind==="pipe"?pipeAt(b,x,lz):0;
         if(k>0.25){
           const t=Math.min(0.62,k/6.5);
           r=r*(1-t)+0.686*t; g2=g2*(1-t)+0.780*t; b2=b2*(1-t)+0.867*t;
         }
-        if(jumps){
+        if(kind==="jumps"){
           for(const kk of parkKickers(b)){
             const u=lz-kk.kz;
             if(u>-3.0&&u<1.1&&Math.abs(x-kk.xc)<15){ r=1.0; g2=0.796; b2=0.541; break; }
           }
-        }else{
+        }else if(kind==="pipe"){
           const p=pipeSpec(b), a=Math.abs(x-p.xc);
           if(Math.abs(a-(p.fb+p.tw))<1.7&&lz>12&&lz<88){ r=1.0; g2=0.796; b2=0.541; }
         }
@@ -586,8 +583,9 @@ class Chunk{
     this.obs.length=0;
     const rnd=mulberry(b*7919+SEED);
     const f=featOf(b);
-    const nT = f==="glade"?MAXT : f==="boulder"?14 : f==="cliff"?12 : f==="park"?8 : 26;
-    const nR = f==="boulder"?MAXR : f==="glade"?4 : f==="park"?2 : 10;
+    // the park is a built venue: nothing natural grows in it
+    const nT = f==="park"?0 : f==="glade"?MAXT : f==="boulder"?14 : f==="cliff"?12 : 26;
+    const nR = f==="park"?0 : f==="boulder"?MAXR : f==="glade"?4 : 10;
     const d=new THREE.Object3D();
     d.rotation.order="YXZ";
 
@@ -601,7 +599,7 @@ class Chunk{
       d.position.set(x,y,z); d.rotation.set(0,yaw||0,0); d.scale.set(w,h,1);
       d.updateMatrix(); this.flags.setMatrixAt(bi++,d.matrix); };
     let tu=0;
-    if(f==="park"){
+    if(f==="park"&&parkKind(b)!=="run"){
       const jumps=parkKind(b)==="jumps";
       const lane = jumps ? parkKickers(b)[0].xc : pipeSpec(b).xc;
       const gz=z0+(jumps?parkKickers(b)[0].kz-24:6);
@@ -650,14 +648,19 @@ class Chunk{
       d.scale.set(0.001,0.001,0.001); d.updateMatrix(); this.flags.setMatrixAt(i,d.matrix); }
 
     const nL = f==="park"?MAXL : (f==="glade"||f==="open")?3 : 1;
+    const kindL = f==="park"?parkKind(b):null;
     let li=0;
     for(let i=0;i<MAXL;i++){
       let placed=false;
       for(let attempt=0; attempt<8 && li<nL && !placed; attempt++){
-        const park=f==="park", jumps=park&&parkKind(b)==="jumps";
+        const park=f==="park";
         const len=park?(42+rnd()*26):(16+rnd()*14);
-        const lane = park ? (jumps?parkRailLane(b):pipeSpec(b).xc) : 0;
-        const x = park ? (lane+(rnd()*2-1)*(jumps?6:5.0)) : (rnd()*2-1)*84;
+        const lane = !park ? 0
+                   : kindL==="jumps" ? parkRailLane(b)
+                   : kindL==="pipe"  ? pipeSpec(b).xc
+                   : 0;                                   // the run-in rails sit centre stage
+        const spread = !park ? 0 : kindL==="jumps" ? 6 : kindL==="pipe" ? 5.0 : 16;
+        const x = park ? (lane+(rnd()*2-1)*spread) : (rnd()*2-1)*84;
         const margin=len/2+4;
         const zc= park ? clamp(z0+18+rnd()*(CS-36), z0+margin, z0+CS-margin)
                        : (z0+margin+rnd()*Math.max(1,CS-2*margin));
@@ -1554,7 +1557,7 @@ function onNet(m,peer){
       NET.peers.forEach(p=>{ if(p!==peer&&p.dc&&p.dc.readyState==="open"){ try{p.dc.send(JSON.stringify(m));}catch(e){} } });
     }
   }else if(m.t==="go"){ SEED=m.seed; if(m.md){ MODE=m.md; paintMode(); }
-    PARK_START=!!m.ps; paintParkStart(); startRun(false); }
+    PARK_MODE=!!m.ps; paintParkMode(); startRun(false); }
   else if(m.t==="win"){ if(!NET.winner){ NET.winner={name:m.n,score:m.s};
     if(NET.mode==="host") sendAll(m); endRun(); } }
 }
@@ -1668,18 +1671,18 @@ function clockText(sec){
 }
 
 /* ---------- drop-in location ---------- */
-function paintParkStart(){
+function paintParkMode(){
   document.querySelectorAll(".start-b").forEach(b=>
-    b.classList.toggle("sel",(b.dataset.ps==="1")===PARK_START));
+    b.classList.toggle("sel",(b.dataset.ps==="1")===PARK_MODE));
 }
-function loadParkStart(){
-  try{ PARK_START=localStorage.getItem("pl_parkstart")==="1"; }catch(e){}
-  paintParkStart();
+function loadParkMode(){
+  try{ PARK_MODE=localStorage.getItem("pl_parkmode")==="1"; }catch(e){}
+  paintParkMode();
 }
-function setParkStart(on){
-  PARK_START=!!on;
-  try{ localStorage.setItem("pl_parkstart",PARK_START?"1":"0"); }catch(e){}
-  paintParkStart();
+function setParkMode(on){
+  PARK_MODE=!!on;
+  try{ localStorage.setItem("pl_parkmode",PARK_MODE?"1":"0"); }catch(e){}
+  paintParkMode();
 }
 
 /* ---------- stance preference ---------- */
@@ -1703,8 +1706,9 @@ function setStance(dir){
    Rather than recording the whole run, we keep a short rolling pre-roll and only
    commit a clip when something actually happens, then keep the best three. */
 const PRE_FRAMES=42, MAX_CLIP=320, KEEP_CLIPS=3;
-const REC={pre:[],active:null,clips:[],quiet:0};
-function recReset(){ REC.pre.length=0; REC.active=null; REC.clips.length=0; REC.quiet=0; }
+const REC={pre:[],active:null,clips:[],quiet:0,lock:false};
+function recReset(){ REC.pre.length=0; REC.active=null; REC.clips.length=0;
+                     REC.quiet=0; REC.lock=false; }
 function recSnapshot(){
   return {x:P.pos.x,y:P.pos.y,z:P.pos.z,yaw:P.yaw,spin:P.spinAcc,flip:P.flipAcc,roll:P.roll,
           grab:!!(P.air&&P.grabbing),kind:P.grabKind,tuck:!!(!P.air&&P.tucking),
@@ -1717,9 +1721,13 @@ function recStep(dt){
     REC.active.frames.push(f);
     // the length cap has to apply even mid-air: an air-into-grind-into-air chain
     // never goes quiet, and would otherwise record without limit
-    if(REC.active.frames.length>=MAX_CLIP) recClose();
+    if(REC.active.frames.length>=MAX_CLIP){ REC.lock=busy; recClose(); }
     else if(busy) REC.quiet=0;
     else { REC.quiet+=dt; if(REC.quiet>0.55) recClose(); }
+  }else if(REC.lock){
+    // a clip was cut off mid-flight; wait for the wheels down before starting another,
+    // otherwise every following highlight opens in mid-air with no run-up
+    if(!busy){ REC.lock=false; REC.pre.length=0; }
   }else{
     REC.pre.push(f);
     if(REC.pre.length>PRE_FRAMES) REC.pre.shift();
@@ -1742,7 +1750,7 @@ function recClose(){
 /* ---------- game state ---------- */
 let state="menu", last=0, firstFrame=true, sendAcc=0, lastPip=0, hintsT=0;
 function startRun(broadcast){
-  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE,ps:PARK_START?1:0});
+  if(broadcast&&NET.mode==="host") sendAll({t:"go",seed:SEED,md:MODE,ps:PARK_MODE?1:0});
   NET.winner=null; NET.started=true; lastPip=0; recReset();
   $("reel").classList.add("hide");
   ghosts.forEach(o=>o.score=0);
@@ -1750,7 +1758,7 @@ function startRun(broadcast){
   document.querySelectorAll(".panel").forEach(p=>p.classList.add("hide"));
   $("hud").classList.remove("hide"); $("zones").classList.remove("hide");
   $("hints").classList.remove("hide"); $("hints").classList.remove("gone"); hintsT=7;
-  if(MODE!=="time") elGoal.textContent="/ 10,000 TO WIN";
+  if(MODE!=="time") elGoal.textContent="/ "+goalNow().toLocaleString()+" TO WIN";
   paintMode();
   state="countdown"; countdown=INTRO_DUR; firstFrame=true; initAudio();
   introReset(); $("introSkip").classList.remove("hide");
@@ -1843,13 +1851,8 @@ function updateHUD(dt){
     elGoal.classList.toggle("low",left<=15);
     elBar.style.width=(left/RUN_SECONDS*100)+"%";
   }else{
-    elBar.style.width=Math.min(100,P.score/GOAL*100)+"%";
+    elBar.style.width=Math.min(100,P.score/goalNow()*100)+"%";
   }
-  const pb=nextParkBand(P.pos.z);
-  const pd=pb<0?1e9:(pb*CS+18)-P.pos.z;
-  if(pd>10&&pd<420){ elPark.innerHTML="<b>PARK</b> "+Math.round(pd)+"m"; elPark.classList.add("on"); }
-  else if(pd<=10&&pd>-100){ elPark.innerHTML="<b>PARK</b>"; elPark.classList.add("on"); }
-  else elPark.classList.remove("on");
   if(P.air&&P.airT>0.4){ elAir.textContent=P.airT.toFixed(1)+"s"; elAir.classList.add("on"); }
   else elAir.classList.remove("on");
   if(trickT>0){ trickT-=dt; if(trickT<=0) elTrick.classList.remove("on"); }
@@ -1900,7 +1903,7 @@ function frame(t){
     }else{
       let leader=P.score, lname=NET.name;
       ghosts.forEach(o=>{ if(o.score>leader){leader=o.score;lname=o.name;} });
-      if(leader>=GOAL&&!NET.winner){
+      if(leader>=goalNow()&&!NET.winner){
         NET.winner={name:lname,score:leader};
         if(NET.mode!=="solo") sendAll({t:"win",n:lname,s:leader});
         endRun();
@@ -1955,10 +1958,10 @@ if("serviceWorker" in navigator) addEventListener("load",()=>navigator.serviceWo
 document.querySelectorAll(".seg-b").forEach(b=>
   b.onclick=()=>setStance(parseInt(b.dataset.st,10)));
 document.querySelectorAll(".mode-b").forEach(b=>b.onclick=()=>setMode(b.dataset.md));
-document.querySelectorAll(".start-b").forEach(b=>b.onclick=()=>setParkStart(b.dataset.ps==="1"));
+document.querySelectorAll(".start-b").forEach(b=>b.onclick=()=>setParkMode(b.dataset.ps==="1"));
 
 /* ---------- boot ---------- */
-loadStance(); loadMode(); loadParkStart(); joyHome(); resetPlayer(); stepCamera(0.016,true);
+loadStance(); loadMode(); loadParkMode(); joyHome(); resetPlayer(); stepCamera(0.016,true);
 requestAnimationFrame(frame);
 </script>
 </body>

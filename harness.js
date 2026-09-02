@@ -92,13 +92,13 @@ vm.createContext(sandbox);
 const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},heightAt,normalAt,"+
   "stepPlayer,syncChunks,featOf,dropOf,cumDrop,resetPlayer,chunks,GOAL,obstaclesNear,land,"+
   "wipeout,trickName,get SEED(){return SEED},setSeed(v){SEED=v},get state(){return state},"+
-  "CS,SLOPE,roomCode,buildRider,rider,MAT,ranges:[rangeFar,rangeMid,rangeNear],stepBackdrop,"+
+  "CS,SLOPE,roomCode,goalNow,GOAL_PARK,buildRider,rider,MAT,ranges:[rangeFar,rangeMid,rangeNear],stepBackdrop,"+
   "applyStance,REGULAR,GOOFY,setStance,loadStance,get STANCE(){return STANCE},JOY,axis,readTouch,"+
   "JOY_R,DEAD_C,DEAD_T,GRAB_PUSH,joyHome,TIME,poseRider,WAIST,ARM_REST,GRABS,"+
   "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD,"+
   "findRail,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding,"+
-  "nextParkBand,MAXP,MAXB,MAXTU,TUBE_R,parkKind,pipeSpec,pipeAt,parkRailLane,terrainKey,get PARK_START(){return PARK_START},"+
-  "setParkStart,loadParkStart,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP,"+
+  "MAXP,MAXB,MAXTU,TUBE_R,parkKind,pipeSpec,pipeAt,parkRailLane,terrainKey,get PARK_MODE(){return PARK_MODE},"+
+  "setParkMode,loadParkMode,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP,"+
   "heli,buildHeli,stepIntro,introReset,INTRO,INTRO_DUR,T_HOVER,T_RELEASE,"+
   "HOVER_H,HANG_DROP};";
 vm.runInContext(code+exportLine,sandbox,{filename:"game.js"});
