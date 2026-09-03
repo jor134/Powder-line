@@ -321,9 +321,9 @@ function cumDrop(b){
 /* The park is three parallel avenues running the full length of the venue:
    a continuous halfpipe on the left, a grind lane down the middle, a jump line
    on the right. Features are laid on a fixed rhythm rather than scattered. */
-const PIPE_X=-55, GRIND_X=0, JUMP_X=55;
+const PIPE_X=-42, GRIND_X=0, JUMP_X=42;
 function parkKind(b){ return b<=0 ? "run" : "course"; }
-function pipeSpec(){ return {xc:PIPE_X, fb:7.5, tw:8.5, dw:9, H:5.2}; }
+function pipeSpec(){ return {xc:PIPE_X, fb:8, tw:11, dw:6, H:8.0}; }
 function pipeAt(x,z){
   const open=smoothstep(55,135,z);          // opens up once you are off the drop
   if(open<=0) return 0;
@@ -341,11 +341,12 @@ function parkKickers(b){
   let k=_park[b];
   if(!k){
     k=[];
-    for(let i=0;i<2;i++) k.push({            // two booters per 100m, evenly spaced
-      kz: 30+i*46,
-      xc: JUMP_X+(hash2(b,50+i,SEED)*2-1)*5,
-      H : 6.0+hash2(b,60+i,SEED)*2.8
-    });
+    // one big booter per 100m: a full band of run-out to reset before the next
+    k.push({kz:48, xc:JUMP_X+(hash2(b,50,SEED)*2-1)*4,
+            H:6.8+hash2(b,60,SEED)*3.0, up:17, down:6.6, w0:7, w1:18});
+    // a small step-up in the grind lane, on the bands that have no tunnel
+    if((b%2)===0)
+      k.push({kz:70, xc:GRIND_X, H:2.7+hash2(b,62,SEED)*0.9, up:11, down:4.2, w0:5, w1:12});
     _park[b]=k;
   }
   return k;
@@ -354,11 +355,11 @@ function kickerAt(b,x,lz){
   const ks=parkKickers(b);
   let add=0;
   for(let i=0;i<ks.length;i++){
-    const k=ks[i], u=lz-k.kz;
+    const k=ks[i], u=lz-k.kz, up=k.up, dn=k.down;
     let h=0;
-    if(u>-16&&u<=0) h=k.H*smoothstep(-16,0,u);          // longer run-up keeps the angle sane
-    else if(u>0&&u<6.2) h=k.H*(1-smoothstep(0,6.2,u));  // lip face falls away
-    if(h>0) add += h*(1-smoothstep(7,19,Math.abs(x-k.xc)));
+    if(u>-up&&u<=0) h=k.H*smoothstep(-up,0,u);          // run-up
+    else if(u>0&&u<dn) h=k.H*(1-smoothstep(0,dn,u));    // lip face falls away
+    if(h>0) add += h*(1-smoothstep(k.w0,k.w1,Math.abs(x-k.xc)));
   }
   return add;
 }
@@ -366,7 +367,7 @@ function kickerAt(b,x,lz){
 function heightAt(x,z){
   const b=Math.max(0,Math.floor(z/CS));
   let y = -z*SLOPE;
-  y += x*x*0.0022;                                   // bowl walls keep you on the mountain
+  y += x*x*(PARK_MODE?0.0006:0.0022);                // the park is cut flat across
   const nz = vnoise(x*0.011,z*0.011,SEED)*7.5
            + vnoise(x*0.045,z*0.045,SEED+9)*1.6
            + vnoise(x*0.14,z*0.14,SEED+17)*0.32;     // chatter
@@ -496,7 +497,7 @@ const flagGeo=new THREE.BoxGeometry(1,1,0.10);
 const logGeo=new THREE.CylinderGeometry(1,1,1,8);
 logGeo.rotateX(Math.PI/2);          // axis now runs along +Z, so scale.z is the length
 const MAXT=54, MAXR=26, MAXL=8, MAXP=10, MAXB=6, MAXTU=2;
-const TUBE_R=4.7;
+const TUBE_R=3.7;
 const LOG_R=0.38;
 
 class Chunk{
@@ -586,9 +587,10 @@ class Chunk{
           const kz=z0+k.kz;
           flag(k.xc-12.5,heightAt(k.xc-12.5,kz)+2.5,kz,1.9,0.95);
         }
-        /* One tunnel, in the jump lane, sitting in the first kicker's landing zone.
-           Thread the bore on the snow, or clear the kicker and ride over the shell. */
-        const len=27, tx=JUMP_X, tz=z0+54;
+        /* The tunnel lives in the grind lane, just past the step-up: clear the
+           kicker and you land on the shell, stay low and you thread the bore. */
+        const len=26, tx=GRIND_X, tz=z0+88;
+        if((b%2)===1){
         const hA=heightAt(tx,tz+len/2), hB=heightAt(tx,tz-len/2);
         const dyT=(hA-hB)/len;
         let hi=-1e9;
@@ -600,6 +602,7 @@ class Chunk{
         d.updateMatrix(); this.tubes.setMatrixAt(tu,d.matrix);
         this.obs.push({x:tx,z:tz,r:TUBE_R,t:3,yaw:0,half:len/2,cy:cyT,dy:dyT});
         tu++;
+        }
       }
     }
     for(let i=pi;i<MAXP;i++){ d.position.set(0,-9999,0); d.rotation.set(0,0,0);
@@ -638,8 +641,9 @@ class Chunk{
         const side=(b%2)?1:-1;
         // the main line sits dead on the lane centre — the capture corridor is under
         // a metre wide, so even a small offset makes it unfindable
-        placeLog(GRIND_X, z0+46, 52, 0);
-        placeLog(GRIND_X+side*9.5, z0+20, 26, side*0.05);  // a second rail off to one side
+        // one rail per band, dead on the lane centre — the capture corridor is under
+        // a metre wide, so even a small offset makes it unfindable
+        placeLog(GRIND_X, z0+30, 46, 0);
       }else{
         placeLog(GRIND_X, z0+64, 44, 0);                   // one rail on the run-in
       }
@@ -1125,6 +1129,9 @@ function resolveLanding(){
        roughly lined up with it, and not already hopping off one. --- */
 function findRail(){
   if(P.railCool>0||P.crash>0) return null;
+  // holding a hard carve means you are leaving the lane: do not re-capture, or the
+  // rail grabs you again 0.3s after every bail and you can never cross the park
+  if(Math.abs(IN.carve)>0.75) return null;
   for(const o of obstaclesNear(P.pos.z)){
     if(o.t!==2) continue;
     const sn=Math.sin(o.yaw), cs=Math.cos(o.yaw);
@@ -1162,7 +1169,7 @@ function endGrind(){
   if(t<0.30) return;
   P.combo=Math.min(P.combo+1,9);
   const mult=Math.min(1+0.22*(P.combo-1),2.6);
-  const pts=Math.round((Math.floor(t*58)+(t>1.8?80:0))*mult);
+  const pts=Math.round((Math.floor(t*18)+(t>1.8?40:0))*mult);
   P.score+=pts; P.comboT=4.5;
   recCredit(pts,"RAIL "+t.toFixed(1)+"s");
   showTrick("RAIL "+t.toFixed(1)+"s  +"+pts);
@@ -1234,6 +1241,30 @@ function stepPlayer(dt){
   const gh2=heightAt(P.pos.x,P.pos.z);
   if(P.railCool>0) P.railCool-=dt;
 
+  /* Pipe lip. The forward-sampling launch test cannot see a lip that falls away
+     sideways, so the transition is handled explicitly: reaching the lip with outward
+     pace redirects that sideways speed into vertical, and reflects what is left back
+     towards the flat, which is what drops you into the pipe rather than onto the deck. */
+  if(PARK_MODE&&!P.air&&!P.grinding&&P.crash<=0){
+    const ps=pipeSpec(), lat=P.pos.x-ps.xc, lip=ps.fb+ps.tw;
+    // must be ON the transition — without an outer bound this fires anywhere right
+    // of the pipe and keeps kicking riders back into it
+    const aOut=Math.abs(lat);
+    if(aOut>=ps.fb+ps.tw*0.80 && aOut<=lip+1.5){
+      const fx=Math.sin(P.yaw), fz=Math.cos(P.yaw);
+      const outV=fx*P.speed*Math.sign(lat);            // speed heading out of the pipe
+      if(outV>2.2){
+        P.air=true; P.airT=0;
+        P.vy=outV*0.95+2.2;                             // transition stands it up
+        const nfx=-fx*0.34, nfz=fz;                     // and kicks you back inward
+        const vx=nfx*P.speed, vz=nfz*P.speed;
+        P.speed=Math.hypot(vx,vz);
+        P.yaw=Math.atan2(vx,vz);
+        blip(240,0.12,"sine",0.09);
+      }
+    }
+  }
+
   const rail=findRail();
   const tube=findTube();
   if(rail){
@@ -1248,7 +1279,7 @@ function stepPlayer(dt){
     P.speed=Math.max(0,P.speed);
     if(P.railJump||IN.jump){ P.vy=10.6+P.speed*0.145; P.air=true; endGrind();
                              blip(300,0.11,"square",0.09); }
-    else if(P.railBail||Math.abs(IN.carve)>0.75) endGrind();
+    else if(P.railBail||Math.abs(IN.carve)>0.75){ endGrind(); P.railCool=0.9; }
     P.railJump=false; P.railBail=false; IN.jump=false;
     if(P.speed>6&&Math.random()<0.5) emitSpray(P.pos,f2,1);
   }else if(tube&&tube.onTop){
@@ -1303,9 +1334,7 @@ function stepPlayer(dt){
       }
     }
   }
-  /* Pipe wall rides. The launch test only samples ahead of the rider, so a lateral
-     lip can never throw you — the pipe is scored on how high and how long you hold
-     the transition instead. */
+  /* Pipe wall rides, scored on how high and how long you hold the transition. */
   const wallH = PARK_MODE ? pipeAt(P.pos.x,P.pos.z) : 0;
   if(!P.air&&!P.grinding&&P.crash<=0&&wallH>1.6){
     P.wallT+=dt; P.wallH=Math.max(P.wallH,wallH);
@@ -1314,7 +1343,7 @@ function stepPlayer(dt){
     if(wt>0.30){
       P.combo=Math.min(P.combo+1,9);
       const m3=Math.min(1+0.22*(P.combo-1),2.6);
-      const pts=Math.round((Math.round(wh*16)+Math.floor(wt*24))*m3);
+      const pts=Math.round((Math.round(wh*11)+Math.floor(wt*17))*m3);
       P.score+=pts; P.comboT=4.5;
       recCredit(pts,"WALL RIDE "+wh.toFixed(1)+"m");
       showTrick("WALL RIDE "+wh.toFixed(1)+"m  +"+pts);
@@ -1339,7 +1368,7 @@ function stepPlayer(dt){
     if(tt>0.22){
       P.combo=Math.min(P.combo+1,9);
       const m2=Math.min(1+0.22*(P.combo-1),2.6);
-      const pts=Math.round((55+Math.floor(tt*70))*m2);
+      const pts=Math.round((16+Math.floor(tt*22))*m2);
       P.score+=pts; P.comboT=4.5;
       recCredit(pts,"TUNNEL");
       showTrick("TUNNEL  +"+pts);

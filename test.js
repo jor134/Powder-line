@@ -676,11 +676,16 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   const P=G.P, IN=G.IN;
   ok(Math.abs(P.pos.x-G.GRIND_X)<1,"the helicopter drops you into the grind lane");
   // a rider who actually holds a lane: angle across, then straighten up on it
+  // lane changes are made in the gaps between features — you cannot climb the
+  // flank of a 9m booter sideways and keep any speed
   const ride=targetX=>{
     G.resetPlayer();
     let grind=0, air=0;
     for(let i=0;i<60*60;i++){
-      const wantYaw=Math.max(-0.75,Math.min(0.75,(targetX-P.pos.x)*0.035));
+      const bb=Math.floor(P.pos.z/G.CS), lz=P.pos.z-bb*G.CS;
+      const blocked = bb>=1 && G.kickerAt(bb,P.pos.x,lz)>1.0;
+      const aim = blocked ? P.pos.x : targetX;
+      const wantYaw=Math.max(-0.75,Math.min(0.75,(aim-P.pos.x)*0.045));
       IN.carve=Math.max(-1,Math.min(1,(P.yaw-wantYaw)*2.2));
       IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
       G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
@@ -836,13 +841,19 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
 /* 22b — jump line: two evenly spaced booters per band */
 {
   G.setSeed(1337); G.setParkMode(true); G.cumDrop(60);
-  const ks=G.parkKickers(4);
-  ok(ks.length===2,"two kickers per 100m, not a scattered crowd ("+ks.length+")");
-  ok(Math.abs((ks[1].kz-ks[0].kz)-46)<0.01,"spaced a regular "+(ks[1].kz-ks[0].kz)+"m apart");
-  const heights=ks.map(k=>G.kickerAt(4,k.xc,k.kz));
-  ok(Math.min(...heights)>5,"each stands over 5m ("+heights.map(h=>h.toFixed(1)).join("/")+"m)");
-  ok(G.kickerAt(4,ks[0].xc,0)===0&&G.kickerAt(4,ks[0].xc,99.9)===0,
-     "and both fade out inside the band");
+  const big=b=>G.parkKickers(b).filter(k=>Math.abs(k.xc-G.JUMP_X)<10);
+  ok(big(3).length===1&&big(4).length===1,"exactly one booter per 100m in the jump lane");
+  ok(Math.abs(big(3)[0].kz-big(4)[0].kz)<0.01,
+     "landing on the same mark each band, so they sit a clean 100m apart");
+  const h=G.kickerAt(4,big(4)[0].xc,big(4)[0].kz);
+  ok(h>6,"the booter stands "+h.toFixed(1)+"m tall");
+  const runOut=100-(big(4)[0].kz+big(4)[0].down);
+  ok(runOut>40,runOut.toFixed(0)+"m of run-out before the next one — room to reset");
+  ok(G.kickerAt(4,big(4)[0].xc,0)===0&&G.kickerAt(4,big(4)[0].xc,99.9)===0,
+     "and it fades out inside its own band");
+  // the small step-up lives in the grind lane, on the bands with no tunnel
+  ok(G.parkKickers(4).some(k=>Math.abs(k.xc-G.GRIND_X)<1),"even bands carry a grind-lane step-up");
+  ok(!G.parkKickers(3).some(k=>Math.abs(k.xc-G.GRIND_X)<1),"odd bands leave that slot for the tunnel");
   G.setParkMode(false);
 }
 
@@ -854,23 +865,24 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
     G.syncChunks(b*G.CS+50);
     for(const c of G.chunks) if(c.band===b) rails=rails.concat(c.obs.filter(o=>o.t===2));
   }
-  ok(rails.length>=20,"the grind lane is well stocked ("+rails.length+" rails over 1.5km)");
+  ok(rails.length>=14,"the grind lane carries a rail every band ("+rails.length+" over 1.5km)");
   ok(rails.every(r=>Math.abs(r.x-G.GRIND_X)<14),"every rail sits in the grind lane");
-  const long=rails.filter(r=>r.half*2>=50);
-  ok(long.length>=14,long.length+" of them are 50m or more — a proper grind line");
-  // one long rail plus one warm-up per band, so they cannot pile up
-  ok(rails.length<=2*15+2,"no more than two rails per band ("+rails.length+")");
+  const long=rails.filter(r=>r.half*2>=44);
+  ok(long.length>=14,long.length+" of them are 44m or more — a proper grind line");
+  ok(rails.length<=16,"one rail per band, so they cannot pile up ("+rails.length+")");
   G.setParkMode(false);
 }
 
 /* 24b — the tunnel is solid: thread the bore, or ride over the shell */
 {
   G.setSeed(1337); G.setParkMode(true); G.resetPlayer(); G.syncChunks(150);
-  const c=G.chunks.find(x=>x.band===1);
+  const c=G.chunks.find(x=>x.band===1);          // odd bands carry the tunnel
   const T=c.obs.find(o=>o.t===3);
-  ok(!!T,"a tunnel sits in the jump lane");
-  ok(Math.abs(T.x-G.JUMP_X)<1,"aligned with the kicker landings");
+  ok(!!T,"a tunnel is placed");
+  ok(Math.abs(T.x-G.GRIND_X)<1,"the tunnel sits in the grind lane");
   ok(T.half*2>=24,"and is "+(T.half*2).toFixed(0)+"m long");
+  const c2=G.chunks.find(x=>x.band===2);
+  ok(!c2||!c2.obs.some(o=>o.t===3),"even bands get the step-up instead, so the lane stays open");
 
   const P=G.P, IN=G.IN;
   const line=startY=>{
@@ -903,10 +915,11 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
   const G2=G, P=G.P, IN=G.IN;
   const lane=(tx0,amp)=>{
     G.setSeed(1337); G.setParkMode(true); G.resetPlayer();
+    P.pos.x=tx0;                                   // measure the lane, not the traverse
     let air=0,grind=0,wall=0;
     for(let i=0;i<60*120;i++){
       const tx=tx0+(amp?Math.sin(i/80)*amp:0);
-      const wantYaw=Math.max(-0.8,Math.min(0.8,(tx-P.pos.x)*0.045));
+      const wantYaw=Math.max(-0.85,Math.min(0.85,(tx-P.pos.x)*0.055));
       IN.carve=Math.max(-1,Math.min(1,(P.yaw-wantYaw)*2.2));
       IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
       if(P.air&&P.airT>0.15){ const g=P.pos.y-G.heightAt(P.pos.x,P.pos.z);
@@ -917,20 +930,56 @@ const SEEDS=[1337,42,90210,7,555001,314159,86,2024];
     G.setParkMode(false);
     return {score:P.score,air,grind,wall};
   };
-  const pipe=lane(G.PIPE_X,19), grind=lane(G.GRIND_X,0), jump=lane(G.JUMP_X,0);
+  const pipe=lane(G.PIPE_X,28), grind=lane(G.GRIND_X,0), jump=lane(G.JUMP_X,0);
 
   ok(pipe.wall>60*20,"the pipe lane is spent on the transitions ("+(pipe.wall/60).toFixed(0)+"s)");
   ok(grind.grind>60*30,"the grind lane is spent on rails ("+(grind.grind/60).toFixed(0)+"s)");
   ok(jump.air>60*20,"the jump lane is spent in the air ("+(jump.air/60).toFixed(0)+"s)");
 
-  ok(pipe.grind===0&&pipe.air<60*5,"the pipe lane has no rails or booters in it");
+  ok(pipe.grind===0,"the pipe lane has no rails in it");
   ok(grind.wall===0,"the grind lane has no pipe wall in it");
   ok(jump.grind===0&&jump.wall===0,"the jump lane has neither");
 
   const s=[pipe.score,grind.score,jump.score];
   ok(Math.min(...s)>3000,"every lane is worth riding (worst "+Math.min(...s)+" in 2 minutes)");
-  ok(Math.max(...s)/Math.min(...s)<1.9,
+  ok(Math.max(...s)/Math.min(...s)<1.75,
      "and no lane dominates (pipe "+pipe.score+", grind "+grind.score+", jump "+jump.score+")");
+}
+
+/* 26b — the pipe lip must throw you back INTO the pipe, not onto the deck */
+{
+  G.setSeed(1337); G.setParkMode(true); G.resetPlayer();
+  const P=G.P, IN=G.IN, p=G.pipeSpec();
+  ok(p.H>=8,"the walls stand "+p.H+"m");
+  const lipAngle=Math.atan(p.H*Math.PI/2/p.tw)*57.3;
+  ok(lipAngle>44,"and the transition reaches "+lipAngle.toFixed(0)+"deg at the lip");
+
+  P.pos.x=p.xc; P.pos.z=400; P.pos.y=G.heightAt(P.pos.x,P.pos.z);
+  P.speed=26; P.air=false; P.yaw=0;
+  let launches=0, inward=0, maxLat=0, landedIn=0, wasAir=false;
+  for(let i=0;i<60*100;i++){
+    const tx=p.xc+Math.sin(i/80)*28;
+    const wantYaw=Math.max(-0.85,Math.min(0.85,(tx-P.pos.x)*0.055));
+    IN.carve=Math.max(-1,Math.min(1,(P.yaw-wantYaw)*2.2));
+    IN.spin=0;IN.flip=0;IN.jump=false;IN.grabL=false;IN.hold=false;
+    const latBefore=P.pos.x-p.xc;
+    G.syncChunks(P.pos.z); G.stepPlayer(G.TIME/60);
+    const lat=P.pos.x-p.xc;
+    maxLat=Math.max(maxLat,Math.abs(lat));
+    if(P.air&&!wasAir&&Math.abs(latBefore)>=p.fb+p.tw*0.78){   // fired at the lip
+      launches++;
+      // the moment it fires, heading must be turned back toward the flat bottom
+      if(Math.sin(P.yaw)*Math.sign(latBefore)<0) inward++;
+    }
+    if(!P.air&&wasAir&&Math.abs(lat)<p.fb+p.tw&&launches>0) landedIn++;
+    wasAir=P.air;
+  }
+  ok(maxLat>p.fb+p.tw*0.9,"the rider reaches the lip ("+maxLat.toFixed(0)+"m out)");
+  ok(launches>=8,"and the lip launches them ("+launches+" times in 100s)");
+  ok(inward===launches,"every launch is redirected back toward the flat ("+inward+"/"+launches+")");
+  ok(landedIn>=launches*0.7,"and they drop back into the pipe rather than onto the deck ("+
+     landedIn+" landings inside vs "+launches+" lip launches)");
+  G.setParkMode(false);
 }
 
 /* 19 — a stick with no thumb on it never writes input */
