@@ -321,16 +321,30 @@ function cumDrop(b){
 /* The park is three parallel avenues running the full length of the venue:
    a continuous halfpipe on the left, a grind lane down the middle, a jump line
    on the right. Features are laid on a fixed rhythm rather than scattered. */
-const PIPE_X=-42, GRIND_X=0, JUMP_X=42;
+const PIPE_X=-45, GRIND_X=0, JUMP_X=45;
 function parkKind(b){ return b<=0 ? "run" : "course"; }
-function pipeSpec(){ return {xc:PIPE_X, fb:8, tw:11, dw:6, H:8.0}; }
+function pipeSpec(){ return {xc:PIPE_X, fb:8, tw:9.5, dw:10, H:11.5}; }
+/* Wall profile, normalised 0..1 across the transition. Cosine up to 85%, then a
+   quadratic cap that eases the slope to level at the lip. A hard corner at the lip
+   cannot be drawn by a vertex grid 3m apart — it gets cut off by metres — so the
+   wall stands at 64deg through its middle and rounds over only at the very top. */
+const PIPE_TC=0.85, PIPE_A=1.1349;
+function pipeProfile(t){
+  if(t<=0) return 0;
+  if(t>=1) return 1;
+  if(t<=PIPE_TC) return PIPE_A*(1-Math.cos(t*Math.PI/2));
+  const y0=PIPE_A*(1-Math.cos(PIPE_TC*Math.PI/2));
+  const m=PIPE_A*(Math.PI/2)*Math.sin(PIPE_TC*Math.PI/2);
+  const d=1-PIPE_TC, sx=t-PIPE_TC;
+  return y0+m*sx-(m/(2*d))*sx*sx;
+}
 function pipeAt(x,z){
   const open=smoothstep(55,135,z);          // opens up once you are off the drop
   if(open<=0) return 0;
   const p=pipeSpec(), a=Math.abs(x-p.xc);
   let h;
   if(a<p.fb) h=0;
-  else if(a<p.fb+p.tw) h=p.H*(1-Math.cos(((a-p.fb)/p.tw)*Math.PI/2));
+  else if(a<p.fb+p.tw) h=p.H*pipeProfile((a-p.fb)/p.tw);
   else h=p.H*(1-smoothstep(p.fb+p.tw,p.fb+p.tw+p.dw,a));
   return h*open;
 }
@@ -1169,7 +1183,7 @@ function endGrind(){
   if(t<0.30) return;
   P.combo=Math.min(P.combo+1,9);
   const mult=Math.min(1+0.22*(P.combo-1),2.6);
-  const pts=Math.round((Math.floor(t*18)+(t>1.8?40:0))*mult);
+  const pts=Math.round((Math.floor(t*11)+(t>1.8?28:0))*mult);
   P.score+=pts; P.comboT=4.5;
   recCredit(pts,"RAIL "+t.toFixed(1)+"s");
   showTrick("RAIL "+t.toFixed(1)+"s  +"+pts);
@@ -1250,13 +1264,15 @@ function stepPlayer(dt){
     // must be ON the transition — without an outer bound this fires anywhere right
     // of the pipe and keeps kicking riders back into it
     const aOut=Math.abs(lat);
-    if(aOut>=ps.fb+ps.tw*0.80 && aOut<=lip+1.5){
+    if(aOut>=ps.fb+ps.tw*0.88 && aOut<=lip+1.5){
       const fx=Math.sin(P.yaw), fz=Math.cos(P.yaw);
       const outV=fx*P.speed*Math.sign(lat);            // speed heading out of the pipe
-      if(outV>2.2){
+      // on a near-vertical wall almost all sideways pace has already become height by
+      // the time you reach the lip, so the pop scales with the speed you arrive with
+      if(P.speed>7){
         P.air=true; P.airT=0;
-        P.vy=outV*0.95+2.2;                             // transition stands it up
-        const nfx=-fx*0.34, nfz=fz;                     // and kicks you back inward
+        P.vy=2.4+Math.max(0,outV)*0.55+P.speed*0.30;
+        const nfx=outV>0?-fx*0.34:fx, nfz=fz;           // reflect only if heading out
         const vx=nfx*P.speed, vz=nfz*P.speed;
         P.speed=Math.hypot(vx,vz);
         P.yaw=Math.atan2(vx,vz);
@@ -1343,7 +1359,7 @@ function stepPlayer(dt){
     if(wt>0.30){
       P.combo=Math.min(P.combo+1,9);
       const m3=Math.min(1+0.22*(P.combo-1),2.6);
-      const pts=Math.round((Math.round(wh*11)+Math.floor(wt*17))*m3);
+      const pts=Math.round((Math.round(wh*14)+Math.floor(wt*16))*m3);
       P.score+=pts; P.comboT=4.5;
       recCredit(pts,"WALL RIDE "+wh.toFixed(1)+"m");
       showTrick("WALL RIDE "+wh.toFixed(1)+"m  +"+pts);
@@ -1368,7 +1384,7 @@ function stepPlayer(dt){
     if(tt>0.22){
       P.combo=Math.min(P.combo+1,9);
       const m2=Math.min(1+0.22*(P.combo-1),2.6);
-      const pts=Math.round((16+Math.floor(tt*22))*m2);
+      const pts=Math.round((11+Math.floor(tt*15))*m2);
       P.score+=pts; P.comboT=4.5;
       recCredit(pts,"TUNNEL");
       showTrick("TUNNEL  +"+pts);

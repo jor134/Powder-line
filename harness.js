@@ -97,7 +97,7 @@ const exportLine = "\n;globalThis.__G={get P(){return P},get IN(){return IN},hei
   "JOY_R,DEAD_C,DEAD_T,GRAB_PUSH,joyHome,TIME,poseRider,WAIST,ARM_REST,GRABS,"+
   "grabKindFrom,RUN_SECONDS,clockText,setMode,loadMode,get MODE(){return MODE},updateHUD,"+
   "findRail,findTube,endGrind,parkKickers,kickerAt,LOG_R,emitSpray,spray,resolveLanding,"+
-  "MAXP,MAXB,MAXTU,TUBE_R,parkKind,pipeSpec,pipeAt,PIPE_X,GRIND_X,JUMP_X,terrainKey,get PARK_MODE(){return PARK_MODE},"+
+  "MAXP,MAXB,MAXTU,TUBE_R,parkKind,pipeSpec,pipeAt,pipeProfile,PIPE_X,GRIND_X,JUMP_X,terrainKey,get PARK_MODE(){return PARK_MODE},"+
   "setParkMode,loadParkMode,REC,recStep,recReset,recClose,recCredit,REEL,PRE_FRAMES,MAX_CLIP,"+
   "heli,buildHeli,stepIntro,introReset,INTRO,INTRO_DUR,T_HOVER,T_RELEASE,"+
   "HOVER_H,HANG_DROP};";
